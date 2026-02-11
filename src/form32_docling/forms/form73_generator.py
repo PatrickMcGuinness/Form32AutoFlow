@@ -5,10 +5,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader
 
 from form32_docling.config import Config
 from form32_docling.models import PatientInfo
+
+from .form_mappings import map_form73_fields, map_form73_section_i_fields
+from .pdf_form_utils import (
+    apply_field_values,
+    clone_template_to_writer,
+    extract_encryption_profile,
+    normalize_for_acrobat,
+    reencrypt_writer_if_needed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,20 +64,8 @@ class Form73Generator:
         self.font_name = "Helvetica-Bold"
         self.font_size = 8
 
-    def _split_date(self, date_str: str | None) -> tuple[str, str, str]:
-        """Split date string into (month, day, year)."""
-        if not date_str:
-            return "", "", ""
-        for fmt in ["%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y"]:
-            try:
-                dt = datetime.strptime(date_str, fmt)
-                return f"{dt.month:02d}", f"{dt.day:02d}", f"{dt.year}"
-            except ValueError:
-                continue
-        return "", "", ""
-
     def _map_patient_info_to_fields(self, info: PatientInfo) -> dict[str, Any]:
-        """Map PatientInfo attributes to Form 73 field name.
+        """Map PatientInfo attributes to Form 73 field names.
 
         Args:
             info: Patient information.
@@ -76,40 +73,14 @@ class Form73Generator:
         Returns:
             Dictionary mapping field names to values.
         """
-        ssn_last4 = info.ssn.split("-")[-1] if info.ssn else ""
-        month, day, year = self._split_date(info.exam_date)
+        return map_form73_fields(info)
 
-        # Split time into hour and minutes
-        hour, minute = "", ""
-        if info.exam_time:
-            try:
-                dt_time = datetime.strptime(info.exam_time, "%I:%M %p")
-                hour = f"{dt_time.hour % 12 or 12}"
-                minute = f"{dt_time.minute:02d}"
-            except ValueError:
-                pass
+    def _map_section_i_general_info_fields(self, info: PatientInfo) -> dict[str, Any]:
+        """Map Section I (General Information) fields for DWC-073.
 
-        fields: dict[str, Any] = {
-            "1.  Injured Employee's Name": info.patient_name,
-            "2.  Date of Injury": info.date_of_injury,
-            "3.  Social Security Number": ssn_last4,
-            "5a.  Doctor's/Delegating Doctor's Name and Degree": f"{info.doctor_name}, {info.doctor_license_type}" if info.doctor_name else "",
-            "6.  Clinic/Facility Name": _clean_facility_name(info.exam_location),
-            "7.  Clinic/Facility/Doctor Phone & Fax": f"{info.doctor_phone} / {info.doctor_fax}" if info.doctor_phone else "",
-            "8.  Clinic/Facility/Doctor Address (street address)": info.doctor_address,
-            "9.  Employer's Name": info.employer_name,
-            "11.  Insurance Carrier": info.insurance_carrier,
-            "Role: Designated doctor": "/Yes",  # Explicitly Designated Doctor
-            "date of TD evaluation month (mm)": month,
-            "date of TD evaluation day (dd)": day,
-            "date of TD evaluation year (yyyy)": year,
-            "Time of TD evaluation HOUR": hour,
-            "Time of TD evaluation MINUTES": minute,
-            "Discharge time": _calculate_discharge_time(info.exam_time),
-            "Date Being Sent": datetime.now().strftime("%m/%d/%Y"),
-        }
-
-        return fields
+        This maps the 12 General Information fields from extracted Form32 data.
+        """
+        return map_form73_section_i_fields(info)
 
     def generate(self, patient_info: PatientInfo) -> Path:
         """Generate Form-073 PDF by filling form fields.
@@ -141,13 +112,13 @@ class Form73Generator:
         )
 
         reader = PdfReader(str(self.template_path))
-        writer = PdfWriter()
-
-        # Clone entire document structure (including AcroForm)
-        writer.clone_document_from_reader(reader)
+        encryption_profile = extract_encryption_profile(reader)
+        writer = clone_template_to_writer(reader)
 
         field_values = self._map_patient_info_to_fields(patient_info)
-        writer.update_page_form_field_values(writer.pages[0], field_values)
+        apply_field_values(writer, field_values, page_spec=0, auto_regenerate=None)
+        normalize_for_acrobat(writer)
+        reencrypt_writer_if_needed(writer, encryption_profile)
 
         with open(output_path, "wb") as f:
             writer.write(f)

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import logging
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from docling.datamodel import vlm_model_specs
 from docling.datamodel.base_models import InputFormat
@@ -19,53 +23,54 @@ from docling.pipeline.vlm_pipeline import VlmPipeline
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-def apply_kv_cache_fix():
+def apply_kv_cache_fix() -> None:
     """Apply the KV cache fix for Transformers models as seen in form32_processor.py."""
     try:
         from docling.models.vlm_pipeline_models import hf_transformers_model
         from transformers import AutoModelForVision2Seq
 
-        _original_process_images = hf_transformers_model.HuggingFaceTransformersVlmModel.process_images
+        model_cls = cast(Any, hf_transformers_model.HuggingFaceTransformersVlmModel)
+        _original_process_images = cast(Callable[..., Any], model_cls.process_images)
 
-        def _patched_process_images(self, *args, **kwargs):
+        def _patched_process_images(self: Any, *args: Any, **kwargs: Any) -> Any:
             if (
-                hasattr(self, 'generation_config')
+                hasattr(self, "generation_config")
                 and self.generation_config is not None
-                and hasattr(self.generation_config, 'use_cache')
+                and hasattr(self.generation_config, "use_cache")
             ):
                 self.generation_config.use_cache = True
 
-            if hasattr(self, 'use_cache'):
+            if hasattr(self, "use_cache"):
                 self.use_cache = True
 
-            if hasattr(self, 'vlm_model') and self.vlm_model is not None:
+            if hasattr(self, "vlm_model") and self.vlm_model is not None:
                 model = self.vlm_model
-                if hasattr(model, 'generation_config') and model.generation_config is not None:
+                if hasattr(model, "generation_config") and model.generation_config is not None:
                     model.generation_config.use_cache = True
-                if hasattr(model, 'config') and hasattr(model.config, 'use_cache'):
+                if hasattr(model, "config") and hasattr(model.config, "use_cache"):
                     model.config.use_cache = True
 
             return _original_process_images(self, *args, **kwargs)
 
-        hf_transformers_model.HuggingFaceTransformersVlmModel.process_images = _patched_process_images
+        model_cls.process_images = _patched_process_images
 
-        _original_from_pretrained = AutoModelForVision2Seq.from_pretrained
+        auto_model_cls = cast(Any, AutoModelForVision2Seq)
+        _original_from_pretrained = cast(Callable[..., Any], auto_model_cls.from_pretrained)
 
-        @classmethod
-        def _patched_from_pretrained(cls, *args, **kwargs):
-            model = _original_from_pretrained.__func__(cls, *args, **kwargs)
-            if hasattr(model, 'config') and hasattr(model.config, 'use_cache'):
+        def _patched_from_pretrained(*args: Any, **kwargs: Any) -> Any:
+            model = _original_from_pretrained(*args, **kwargs)
+            if hasattr(model, "config") and hasattr(model.config, "use_cache"):
                 model.config.use_cache = True
-            if hasattr(model, 'generation_config') and model.generation_config is not None:
+            if hasattr(model, "generation_config") and model.generation_config is not None:
                 model.generation_config.use_cache = True
             return model
 
-        AutoModelForVision2Seq.from_pretrained = _patched_from_pretrained
+        auto_model_cls.from_pretrained = _patched_from_pretrained
         logger.info("Applied KV cache fix for Transformers")
-    except Exception as e:
+    except (ImportError, AttributeError, TypeError) as e:
         logger.warning(f"Could not apply KV cache fix: {e}")
 
-def run_benchmark(pdf_path: Path, model_id: str, backend: str):
+def run_benchmark(pdf_path: Path, model_id: str, backend: str) -> None:
     logger.info(f"BENCHMARK START: Model={model_id}, Backend={backend}")
 
     pipeline_options = VlmPipelineOptions()
@@ -78,19 +83,19 @@ def run_benchmark(pdf_path: Path, model_id: str, backend: str):
 
     if backend == "vllm":
         # Memory-optimized VLLM settings
-        vlm_options = {
-            'extra_generation_config': {
-                'max_model_len': 8192,
-                'gpu_memory_utilization': 0.80,
-                'enforce_eager': True,
+        vlm_options: dict[str, Any] = {
+            "extra_generation_config": {
+                "max_model_len": 8192,
+                "gpu_memory_utilization": 0.80,
+                "enforce_eager": True,
             },
-            'max_new_tokens': 8192,
+            "max_new_tokens": 8192,
         }
     else:
         # Transformers settings
         vlm_options = {
-            'extra_generation_config': {
-                'use_cache': True,
+            "extra_generation_config": {
+                "use_cache": True,
             }
         }
         apply_kv_cache_fix()
@@ -116,7 +121,7 @@ def run_benchmark(pdf_path: Path, model_id: str, backend: str):
     final_vlm_options = base_spec.model_copy(update={"max_new_tokens": vlm_options.get("max_new_tokens", 8192)})
 
     if "extra_generation_config" in vlm_options:
-        orig_config = getattr(base_spec, "extra_generation_config", {})
+        orig_config = cast(dict[str, Any], getattr(base_spec, "extra_generation_config", {}))
         new_config = {**orig_config, **vlm_options["extra_generation_config"]}
         final_vlm_options.extra_generation_config = new_config
 
@@ -153,12 +158,16 @@ def run_benchmark(pdf_path: Path, model_id: str, backend: str):
         print(result_line, flush=True)
 
 
-    except Exception as e:
+    except (RuntimeError, ValueError, OSError) as e:
         logger.error(f"Benchmark failed: {e}")
         print(f"ERROR|{model_id}|{backend}|{e}", flush=True)
+    except Exception as e:
+        message = f"Benchmark failed with unexpected error: {e}"
+        logger.exception(message)
+        raise RuntimeError(message) from e
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="VLM Performance Benchmark")
     parser.add_argument("--pdf", type=str, required=True, help="Path to PDF file")
     parser.add_argument("--model", type=str, required=True, help="Model ID or alias")

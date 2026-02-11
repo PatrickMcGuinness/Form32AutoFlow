@@ -4,165 +4,33 @@ This module provides the main processor for Form 32 PDFs using IBM's
 docling library for text extraction and layout analysis.
 """
 
+import json
 import logging
+import os
 import re
 import shutil
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, cast
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
+    RapidOcrOptions,
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
 
 # Optional: docling.datamodel.settings may not exist in all versions
+docling_settings: Any | None
 try:
-    from docling.datamodel.settings import settings as docling_settings
+    from docling.datamodel.settings import settings as _docling_settings
     HAS_DOCLING_SETTINGS = True
+    docling_settings = _docling_settings
 except ImportError:
     HAS_DOCLING_SETTINGS = False
     docling_settings = None
 
-
-def _apply_granite_docling_kv_cache_fix() -> None:
-    """Monkey-patch docling to fix granite-docling KV cache bug.
-
-    The ibm-granite/granite-docling-258M model has a bug where:
-    - GenerationConfig.use_cache=False in generation_config.json
-    - text_model.config.use_cache=False in config.json
-
-    This causes ~18x slower generation (~6t/s instead of ~111t/s).
-
-    We patch the process_images method to set use_cache=True on the
-    generation_config RIGHT BEFORE model.generate() is called, ensuring
-    no other code can reset it.
-
-    See: https://huggingface.co/ibm-granite/granite-docling-258M/discussions/37
-    """
-    try:
-        from docling.models.vlm_pipeline_models import hf_transformers_model
-
-        _original_process_images = hf_transformers_model.HuggingFaceTransformersVlmModel.process_images
-
-        def _patched_process_images(self: Any, *args: Any, **kwargs: Any) -> Any:
-            _log = __import__('logging').getLogger(__name__)
-
-            # Fix generation_config.use_cache RIGHT BEFORE generate() is called
-            if (
-                hasattr(self, 'generation_config')
-                and self.generation_config is not None
-                and hasattr(self.generation_config, 'use_cache')
-                and not self.generation_config.use_cache
-            ):
-                self.generation_config.use_cache = True
-                _log.info("KV CACHE FIX [pre-generate]: Set generation_config.use_cache=True")
-
-            # Also ensure self.use_cache is True (this is passed directly to generate())
-            if hasattr(self, 'use_cache') and not self.use_cache:
-                self.use_cache = True
-                _log.info("KV CACHE FIX [pre-generate]: Set self.use_cache=True")
-
-            # Fix model configs as additional safety
-            if hasattr(self, 'vlm_model') and self.vlm_model is not None:
-                model = self.vlm_model
-
-                # Fix model.generation_config.use_cache (THIS is what transformers uses internally during generate())
-                if (
-                    hasattr(model, 'generation_config')
-                    and model.generation_config is not None
-                    and hasattr(model.generation_config, 'use_cache')
-                    and not model.generation_config.use_cache
-                ):
-                    model.generation_config.use_cache = True
-                    _log.info("KV CACHE FIX [pre-generate]: Set model.generation_config.use_cache=True")
-
-                # Fix model.config.use_cache (top-level model config)
-                if (
-                    hasattr(model, 'config')
-                    and hasattr(model.config, 'use_cache')
-                    and not model.config.use_cache
-                ):
-                    model.config.use_cache = True
-                    _log.info("KV CACHE FIX [pre-generate]: Set model.config.use_cache=True")
-
-                # Fix text_model.config.use_cache
-                text_config = None
-                if hasattr(model, 'model') and hasattr(model.model, 'text_model') and hasattr(model.model.text_model, 'config'):
-                    text_config = model.model.text_model.config
-                elif hasattr(model, 'text_model') and hasattr(model.text_model, 'config'):
-                    text_config = model.text_model.config
-
-                if text_config is not None and hasattr(text_config, 'use_cache') and not text_config.use_cache:
-                    text_config.use_cache = True
-                    _log.info("KV CACHE FIX [pre-generate]: Set text_model.config.use_cache=True")
-
-            # Now call the original method
-            return _original_process_images(self, *args, **kwargs)
-
-        hf_transformers_model.HuggingFaceTransformersVlmModel.process_images = _patched_process_images  # type: ignore[method-assign]
-
-        _log = __import__('logging').getLogger(__name__)
-        _log.info("Applied granite-docling KV cache fix (process_images patch)")
-
-        # ADDITIONAL FIX: Patch from_pretrained to fix configs BEFORE torch.compile()
-        # The model is compiled right after from_pretrained(), so we need to fix
-        # the configs before that happens
-        try:
-            from transformers import AutoModelForVision2Seq
-
-            _original_from_pretrained = AutoModelForVision2Seq.from_pretrained
-
-            @classmethod  # type: ignore[misc]
-            def _patched_from_pretrained(cls: Any, *args: Any, **kwargs: Any) -> Any:
-                model = _original_from_pretrained.__func__(cls, *args, **kwargs)  # type: ignore[attr-defined]
-
-                _log_inner = __import__('logging').getLogger(__name__)
-
-                # Check if this is granite-docling (by checking model name in args)
-                model_path = str(args[0]) if args else ""
-                if "granite-docling" in model_path.lower() or "granite" in model_path.lower():
-                    # Fix all use_cache configs BEFORE the model gets compiled
-                    if (
-                        hasattr(model, 'config')
-                        and hasattr(model.config, 'use_cache')
-                        and not model.config.use_cache
-                    ):
-                        model.config.use_cache = True
-                        _log_inner.info("KV CACHE FIX [from_pretrained]: Set model.config.use_cache=True")
-
-                    if (
-                        hasattr(model, 'generation_config')
-                        and model.generation_config is not None
-                        and hasattr(model.generation_config, 'use_cache')
-                        and not model.generation_config.use_cache
-                    ):
-                        model.generation_config.use_cache = True
-                        _log_inner.info("KV CACHE FIX [from_pretrained]: Set model.generation_config.use_cache=True")
-
-                    # Fix nested text_model config
-                    if hasattr(model, 'model') and hasattr(model.model, 'text_model') and hasattr(model.model.text_model, 'config'):
-                        text_config = model.model.text_model.config
-                        if hasattr(text_config, 'use_cache') and not text_config.use_cache:
-                            text_config.use_cache = True
-                            _log_inner.info("KV CACHE FIX [from_pretrained]: Set text_model.config.use_cache=True")
-
-                return model
-
-            AutoModelForVision2Seq.from_pretrained = _patched_from_pretrained  # type: ignore[method-assign, assignment]
-            _log.info("Applied granite-docling KV cache fix (from_pretrained patch)")
-
-        except Exception as e:
-            _log.warning(f"Could not apply from_pretrained patch: {e}")
-
-    except ImportError as e:
-        _log = __import__('logging').getLogger(__name__)
-        _log.warning(f"Could not apply KV cache fix: {e}")
-
-
-# Apply the fix on module import
-_apply_granite_docling_kv_cache_fix()
 
 from form32_docling.config import Config  # noqa: E402
 from form32_docling.config.form32_templates import FIELD_TO_ATTRIBUTE_MAP  # noqa: E402
@@ -173,8 +41,6 @@ from form32_docling.forms import FormGenerationController  # noqa: E402
 from form32_docling.models import Form32Data, PatientInfo  # noqa: E402
 
 logger = logging.getLogger(__name__)
-
-
 
 
 
@@ -214,6 +80,16 @@ class Form32Processor:
         self._full_text: str = ""
         self._page_texts: list[str] = []
         self._checkbox_analyzer: CheckboxAnalyzer | None = None
+        self._vlm_set_fields: set[str] = set()
+        self._field_sources: dict[str, str] = {}
+        self._extracted_fields_trace: dict[str, Any] = {
+            "vlm_raw": {},
+            "vlm_mapped": [],
+            "regex_fallback": [],
+            "location_fallback": [],
+            "opencv_fallback": [],
+            "final_sources": {},
+        }
 
         if verbose:
             logger.setLevel(logging.DEBUG)
@@ -224,6 +100,7 @@ class Form32Processor:
                     logger.debug("Enabled docling pipeline timing profiler")
                 except AttributeError:
                     logger.debug("docling.settings.debug.profile_pipeline_timings not available")
+        self._try_enable_docling_offline_cache()
 
     # Not using VLM in converter, just PDF layout analysis to get text for classification.
     @property
@@ -233,7 +110,10 @@ class Form32Processor:
         if self._converter is None:
             pdf_pipeline_options = PdfPipelineOptions()
             pdf_pipeline_options.images_scale = 1.0  # 2.0+ scale helps with small fonts
-            pdf_pipeline_options.generate_page_images = True
+            pdf_pipeline_options.generate_page_images = self.config.docling_generate_page_images
+            pdf_pipeline_options.enable_remote_services = False
+            # Force RapidOCR (torch backend) to skip auto-probing unavailable OCR engines.
+            pdf_pipeline_options.ocr_options = RapidOcrOptions(backend="torch")
             self._converter = DocumentConverter(
                 format_options={
                     InputFormat.PDF: PdfFormatOption(
@@ -243,94 +123,34 @@ class Form32Processor:
         )
         return self._converter
 
-    '''
-        if self._converter is None:
-            if self.config.docling_model:
-                model_id = self.config.docling_model.lower()
-                logger.info(f"Configuring Docling with model: {self.config.docling_model}")
-                # Use VLLM backend by default for granite-docling to avoid KV cache bug
-                # unless explicitly disabled via environment (not implemented yet)
-                use_vllm = "vllm" in model_id or ("granite" in model_id and "transformers" not in model_id)
+    def _try_enable_docling_offline_cache(self) -> None:
+        """Enable HF/Transformers offline mode when required docling models are cached."""
+        if not self.config.docling_prefer_offline_cache:
+            return
+        if os.environ.get("HF_HUB_OFFLINE") == "1":
+            return
 
-                if "granite" in model_id and not use_vllm:
-                    # Transformers backend for Granite with cache fix
-                    pipeline_options = VlmPipelineOptions()
-                    base_vlm_options = vlm_model_specs.GRANITEDOCLING_TRANSFORMERS
-                    vlm_options_with_cache = base_vlm_options.model_copy(update={
-                        'extra_generation_config': {
-                            **base_vlm_options.extra_generation_config,
-                            'use_cache': True,  # Force KV caching: ~111t/s vs ~6t/s
-                        }
-                    })
-                    pipeline_options.vlm_options = vlm_options_with_cache
+        hub_root = Path.home() / ".cache" / "huggingface" / "hub"
+        required_models = (
+            hub_root / "models--docling-project--docling-layout-heron",
+            hub_root / "models--docling-project--docling-models",
+        )
+        if all(model_path.exists() for model_path in required_models):
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+            logger.info("Enabled offline Hugging Face/Transformers mode from local cache")
+        else:
+            missing = [str(path) for path in required_models if not path.exists()]
+            logger.debug(f"Offline cache mode not enabled; missing cached models: {missing}")
 
-                    pipeline_options.images_scale = 1.0
-                    pipeline_options.generate_page_images = True
+    def _log_phase_timing(self, phase: str, elapsed_seconds: float, budget_seconds: float | None) -> None:
+        """Log phase timing and warn when budget is exceeded."""
+        logger.info(f"PHASE_{phase.upper()} elapsed: {elapsed_seconds:.2f}s")
+        if budget_seconds is not None and elapsed_seconds > budget_seconds:
+            logger.warning(
+                f"PHASE_{phase.upper()} exceeded budget: {elapsed_seconds:.2f}s > {budget_seconds:.2f}s"
+            )
 
-                    pipeline_options.accelerator_options = AcceleratorOptions(
-                        device=AcceleratorDevice.CUDA,
-                        num_threads=8,
-                    )
-                    logger.info("VLM pipeline: CUDA, num_threads=8, use_cache=True (KV cache fix)")
-
-                    self._converter = DocumentConverter(
-                        format_options={
-                            InputFormat.PDF: PdfFormatOption(
-                                pipeline_cls=VlmPipeline,
-                                pipeline_options=pipeline_options
-                            )
-                        }
-                    )
-                else:
-                    # VLLM backend with memory-optimized settings
-                    # Fixes "No available memory for cache blocks" error
-                    # other alternative: Use the model lightonai--LightOnOCR-2-1B
-                    pipeline_options = VlmPipelineOptions()
-
-                    # Configure VLLM with memory-conscious settings
-                    base_vlm_options = vlm_model_specs.GRANITEDOCLING_VLLM
-                    vlm_options_optimized = base_vlm_options.model_copy(update={
-                        'extra_generation_config': {
-                            **base_vlm_options.extra_generation_config,
-                            # VLLM Engine options to reduce memory usage:
-                            'max_model_len': 8192,           # Limit context (default 8192 uses too much)
-                            'gpu_memory_utilization': 0.80,  # Allow 80% GPU memory (default 0.3 is too low)
-                            'enforce_eager': True,           # Disable CUDA graphs to save ~8GB memory
-                        },
-                        'max_new_tokens': 8192,  # Match max_model_len
-                    })
-                    pipeline_options.vlm_options = vlm_options_optimized
-                    pipeline_options.images_scale = 1.0  # Default, faster than 2.0
-                    pipeline_options.generate_page_images = True  # Required for VLM extraction
-
-                    # Configure GPU acceleration with optimized settings
-                    pipeline_options.accelerator_options = AcceleratorOptions(
-                        device=AcceleratorDevice.CUDA,  # Use GPU
-                        num_threads=8,  # Match CPU core count for optimal parallelism
-                    )
-                    logger.info("VLM pipeline: VLLM optimized (max_model_len=8192, gpu_mem=0.80, enforce_eager=True)")
-
-                    self._converter = DocumentConverter(
-                        format_options={
-                            InputFormat.PDF: PdfFormatOption(
-                                pipeline_cls=VlmPipeline,
-                                pipeline_options=pipeline_options
-                            )
-                        }
-                    )
-            else:
-                pdf_pipeline_options = PdfPipelineOptions()
-                pdf_pipeline_options.images_scale = 1.0  # 2.0+ scale helps with small fonts
-                pdf_pipeline_options.generate_page_images = True
-                self._converter = DocumentConverter(
-                    format_options={
-                        InputFormat.PDF: PdfFormatOption(
-                            pipeline_options=pdf_pipeline_options
-                        )
-                    }
-                )
-        return self._converter
-        '''
 
     def _extract_page_texts(self, document: Any) -> list[str]:
         """Extract text for each page from a DoclingDocument.
@@ -364,7 +184,7 @@ class Form32Processor:
                 page_texts.append(page_text)
                 logger.debug(f"Page {page_num}: extracted {len(page_text)} chars from {len(page_text_parts)} items")
 
-        except Exception as e:
+        except (AttributeError, TypeError, ValueError) as e:
             logger.warning(f"Failed to extract page texts via iterate_items: {e}")
 
         return page_texts
@@ -447,7 +267,7 @@ class Form32Processor:
             logger.debug(f"Extracted {len(self._full_text)} characters")
             return bool(self._full_text)
 
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.error(f"Docling extraction failed: {e}")
             self.validation_errors.append(f"Text extraction failed: {e}")
             return False
@@ -482,15 +302,47 @@ class Form32Processor:
     def _extract_with_patterns(self) -> None:
         """Extract fields using regex patterns on full text."""
         logger.debug(f"[{datetime.now().isoformat()}] ENTER Form32Processor._extract_with_patterns()")
+        text = self.full_text
         for field_name, pattern_list in EXTRACTION_PATTERNS.items():
+            if field_name in self._vlm_set_fields:
+                self._extracted_fields_trace["regex_fallback"].append(
+                    {"field": field_name, "status": "skipped", "reason": "vlm_owned"}
+                )
+                continue
+            current_value = getattr(self.patient_info, field_name, None)
+            if not self._is_missing_or_invalid(field_name, current_value):
+                self._extracted_fields_trace["regex_fallback"].append(
+                    {"field": field_name, "status": "skipped", "reason": "already_set"}
+                )
+                continue
             for pattern in pattern_list:
-                match = re.search(pattern, self.full_text, re.IGNORECASE | re.MULTILINE)
+                match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
                 if match:
                     value = self._clean_value(field_name, match.group(1).strip())
-                    if value:
-                        setattr(self.patient_info, field_name, value)
+                    if value and self._set_patient_field(
+                        field_name,
+                        value,
+                        source="regex_fallback",
+                    ):
+                        self._extracted_fields_trace["regex_fallback"].append(
+                            {
+                                "field": field_name,
+                                "pattern": pattern,
+                                "value": value,
+                                "status": "applied",
+                            }
+                        )
                         logger.debug(f"Extracted {field_name}: {value}")
                         break
+                    self._extracted_fields_trace["regex_fallback"].append(
+                        {
+                            "field": field_name,
+                            "pattern": pattern,
+                            "value": value,
+                            "status": "skipped",
+                            "reason": "invalid_or_not_needed",
+                        }
+                    )
 
     def _clean_value(self, field_name: str, value: str) -> str | None:
         """Clean and normalize extracted field values.
@@ -527,7 +379,7 @@ class Form32Processor:
                 return f"{digits[:3]}.{digits[3:6]}.{digits[6:]}"
 
         # SSN - return last 4 only
-        if field_name == "ssn":
+        if field_name == "employee_ssn":
             digits = "".join(c for c in value if c.isdigit())
             if len(digits) >= 4:
                 return digits[-4:]
@@ -551,6 +403,13 @@ class Form32Processor:
     def _extract_location(self) -> None:
         """Extract exam location details."""
         logger.debug(f"[{datetime.now().isoformat()}] ENTER Form32Processor._extract_location()")
+        location_fields = ("exam_location", "exam_location_city", "exam_location_full")
+        if all(field in self._vlm_set_fields for field in location_fields):
+            self._extracted_fields_trace["location_fallback"].append(
+                {"status": "skipped", "reason": "vlm_owned"}
+            )
+            return
+
         match = re.search(
             r"Location:\s*\|\s*(.+?)(?=Fax:)",
             self.full_text,
@@ -562,7 +421,15 @@ class Form32Processor:
             # Facility name
             facility_match = re.match(r"([^,]+)", location_str)
             if facility_match:
-                self.patient_info.exam_location = facility_match.group(1).strip()
+                value = facility_match.group(1).strip()
+                applied = self._set_patient_field("exam_location", value, source="regex_fallback")
+                self._extracted_fields_trace["location_fallback"].append(
+                    {
+                        "field": "exam_location",
+                        "value": value,
+                        "status": "applied" if applied else "skipped",
+                    }
+                )
 
             # City
             city_match = re.search(
@@ -571,9 +438,24 @@ class Form32Processor:
                 re.IGNORECASE,
             )
             if city_match:
-                self.patient_info.exam_location_city = city_match.group(1).strip().upper()
+                value = city_match.group(1).strip().upper()
+                applied = self._set_patient_field("exam_location_city", value, source="regex_fallback")
+                self._extracted_fields_trace["location_fallback"].append(
+                    {
+                        "field": "exam_location_city",
+                        "value": value,
+                        "status": "applied" if applied else "skipped",
+                    }
+                )
 
-            self.patient_info.exam_location_full = location_str
+            applied = self._set_patient_field("exam_location_full", location_str, source="regex_fallback")
+            self._extracted_fields_trace["location_fallback"].append(
+                {
+                    "field": "exam_location_full",
+                    "value": location_str,
+                    "status": "applied" if applied else "skipped",
+                }
+            )
 
     def _analyze_checkboxes(self) -> None:
         """Analyze checkbox states using OpenCV."""
@@ -589,11 +471,15 @@ class Form32Processor:
 
         # Update patient_info with network flags
         network = results.get("network", {})
-        self.patient_info.has_certified_network = network.get(
-            "has_certified_network", False
+        self._set_checkbox_fallback(
+            "has_certified_network",
+            network.get("has_certified_network", False),
+            source="opencv_fallback",
         )
-        self.patient_info.has_political_subdivision = network.get(
-            "has_political_subdivision", False
+        self._set_checkbox_fallback(
+            "has_political_subdivision",
+            network.get("has_political_subdivision", False),
+            source="opencv_fallback",
         )
 
         # Update body area flags
@@ -601,7 +487,7 @@ class Form32Processor:
         for field, checked in body_areas.items():
             attr_name = f"body_area_{field}"
             if hasattr(self.patient_info, attr_name):
-                setattr(self.patient_info, attr_name, checked)
+                self._set_checkbox_fallback(attr_name, checked, source="opencv_fallback")
 
         # Update purpose flags
         purpose = results.get("purpose", {})
@@ -618,7 +504,30 @@ class Form32Processor:
         }
         for key, attr_name in purpose_mapping.items():
             if key in purpose:
-                setattr(self.patient_info, attr_name, purpose[key])
+                if (
+                    self.config.part5_checkbox_assist
+                    and (attr_name.startswith("purpose_box_") or attr_name.startswith("dwc024_"))
+                    and attr_name in self._vlm_set_fields
+                ):
+                    current_value = bool(getattr(self.patient_info, attr_name, False))
+                    opencv_value = bool(purpose[key])
+                    if (not current_value) and opencv_value:
+                        self._set_patient_field(
+                            attr_name,
+                            True,
+                            source="opencv_override_part5",
+                            force=True,
+                        )
+                        self._extracted_fields_trace["opencv_fallback"].append(
+                            {
+                                "field": attr_name,
+                                "value": opencv_value,
+                                "status": "applied",
+                                "reason": "part5_assist_override",
+                            }
+                        )
+                        continue
+                self._set_checkbox_fallback(attr_name, purpose[key], source="opencv_fallback")
 
     def _set_hardcoded_values(self) -> None:
         """Set hardcoded values for designated doctor info."""
@@ -667,53 +576,65 @@ class Form32Processor:
             "DWC032_part6": "part 6. requester information",
         }
 
-        # Front page validation markers
-        front_page_markers = [
-            "texas department of insurance",
+        # Front page and page two validation markers (tuples for immutability and slight performance gain)
+        FRONT_PAGE_MARKERS: tuple[str, ...] = (
             "division of workers' compensation",
-            "designated doctor",
-        ]
+            "commissioner's order",
+            "you must get a medical exam",
+        )
+        EXAM_ORDER_PAGE_TWO_MARKERS: tuple[str, ...] = (
+           # "your exam is",
+           "more information about the exam:",
+        )
+
+        def _matches_all_markers(text: str, markers: tuple[str, ...]) -> bool:
+            """Check if all markers are present in text.
+
+            Uses early termination for better performance on non-matches.
+            """
+            return all(marker in text for marker in markers)
 
         logger.debug(f"Checking {len(self._page_texts)} pages for DWC-032 markers")
         for idx, page_text in enumerate(self._page_texts):
             page_num = idx + 1  # Convert to 1-indexed page number
+
+            # Guard against empty page text
+            if not page_text or not page_text.strip():
+                logger.debug(f"Page {page_num}: Skipping empty page")
+                continue
+
             text_lower = page_text.lower()
             text_upper = page_text.upper()
 
-            # First check if it is a DWC-032 page at all or a front page
+            # Check if this is a DWC-032 form page
+            is_dwc032 = "DWC032" in text_upper or "DWC 032" in text_upper
 
-            is_dwc032 = "DWC032" in text_upper  or "DWC 032" in text_upper
-
-            if not is_dwc032:
-                # Check for exam order page two (before front_page check)
-                exam_order_page_two_markers = [
-                    "commissioner's order",
-                    "you must get a medical exam",
-                ]
-                if all(marker in text_lower for marker in exam_order_page_two_markers):
-                    page_type = "exam_order_page_two"
-                    logger.debug(f"Page {page_num}: Classified as exam_order_page_two")
-                    dwc032_pages[page_num] = page_type
-                    continue
-
-                if all(marker in text_lower for marker in front_page_markers):
-                    page_type = "front_page"
-                    logger.debug(f"Page {page_num}: Classified as front_page")
-                else:
-                    continue  # Not a DWC-032 nor front page, ignore.
-            else:
+            if is_dwc032:
+                # Classify DWC-032 page by specific part markers
                 logger.debug(f"Page {page_num}: Classifying DWC-032 page type ({len(page_text)} chars)")
-
-                # Try to classify by specific part markers
-                page_type = "dwc032" # Default to generic DWC032 page
+                page_type = "dwc032"  # Default to generic DWC032 page
                 for ptype, marker in page_type_markers.items():
                     if marker in text_lower:
                         page_type = ptype
                         logger.debug(f"Page {page_num}: Classified as {ptype}")
                         break
+                dwc032_pages[page_num] = page_type
 
-            # This becomes a dictionary of page numbers to page types
-            dwc032_pages[page_num] = page_type
+            elif _matches_all_markers(text_lower, EXAM_ORDER_PAGE_TWO_MARKERS):
+                # Check for exam order page two (higher priority than front_page)
+                page_type = "exam_order_page_two"
+                logger.debug(f"Page {page_num}: Classified as {page_type}")
+                dwc032_pages[page_num] = page_type
+
+            elif _matches_all_markers(text_lower, FRONT_PAGE_MARKERS):
+                # Check for front page (commissioner's order cover letter)
+                page_type = "front_page"
+                logger.debug(f"Page {page_num}: Classified as {page_type}")
+                dwc032_pages[page_num] = page_type
+            else:
+                logger.debug(f"Page {page_num} not classified.")
+
+            # else: Not a DWC-032 page, front page, or exam order page - skip
 
         logger.info(f"Identified {len(dwc032_pages)} DWC-032 pages: {dwc032_pages}")
         return dwc032_pages
@@ -738,16 +659,20 @@ class Form32Processor:
                 return False
 
             logger.info("Using VLM-based DocumentExtractor with page-specific templates")
-            extractor = Form32Extractor(verbose=self.verbose)
+            extractor = Form32Extractor(
+                verbose=self.verbose,
+                use_part5_checkbox_assist=self.config.part5_checkbox_assist,
+            )
 
             # Use template-based extraction for each page type
             template_fields = extractor.extract_with_templates(self.pdf_path, dwc032_pages)
+            self._extracted_fields_trace["vlm_raw"] = dict(template_fields)
 
             # Map template-extracted fields to PatientInfo using FIELD_TO_ATTRIBUTE_MAP
             self._map_template_fields_to_patient_info(template_fields)
 
             return True
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.error(f"VLM extraction failed: {e}")
             self.validation_errors.append(f"VLM extraction failed: {e}")
             return False
@@ -773,22 +698,87 @@ class Form32Processor:
                 logger.debug(f"No mapping for field: {field_label}")
                 continue
 
-            # Special handling for checkbox fields (Selected/Not Selected -> bool)
-            if attr_name.endswith("_checked"):
+            # Special handling for boolean-like fields from VLM checkbox enums.
+            bool_like_fields = (
+                attr_name.endswith("_checked")
+                or attr_name.startswith("body_area_")
+                or attr_name in {"has_certified_network", "has_political_subdivision"}
+            )
+            if bool_like_fields:
                 if isinstance(value, str):
-                    value = value.lower() == "selected"
+                    value = value.lower() in {
+                        "selected",
+                        "checked",
+                        "yes",
+                        "true",
+                        "checkbox filled",
+                        "filled",
+                    }
                 elif isinstance(value, list):
-                    value = "selected" in [v.lower() for v in value if isinstance(v, str)]
+                    normalized = [v.lower() for v in value if isinstance(v, str)]
+                    value = any(
+                        v in {"selected", "checked", "yes", "true", "checkbox filled", "filled"}
+                        for v in normalized
+                    )
 
             # Set the attribute if it exists on PatientInfo
             if hasattr(self.patient_info, attr_name):
-                setattr(self.patient_info, attr_name, value)
+                self._set_patient_field(attr_name, value, source="vlm", force=True)
+                self._vlm_set_fields.add(attr_name)
+                self._extracted_fields_trace["vlm_mapped"].append(
+                    {"label": field_label, "attribute": attr_name, "value": value}
+                )
                 logger.debug(f"Mapped: {field_label} -> {attr_name} = {value}")
                 mapped_count += 1
             else:
                 logger.warning(f"PatientInfo has no attribute: {attr_name}")
 
         logger.info(f"Mapped {mapped_count} fields to PatientInfo")
+
+    def _is_missing_or_invalid(self, field_name: str, value: Any) -> bool:
+        """Check if a field value is effectively missing or invalid."""
+        if value is None:
+            return True
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return True
+            if stripped in {"|", "||", "|||"}:
+                return True
+            if field_name.endswith("_name") and stripped.replace("|", "").strip() == "":
+                return True
+        return False
+
+    def _set_patient_field(
+        self,
+        field_name: str,
+        value: Any,
+        *,
+        source: str,
+        force: bool = False,
+    ) -> bool:
+        """Set a PatientInfo field with source tracking and fallback guards."""
+        if not hasattr(self.patient_info, field_name):
+            return False
+        current = getattr(self.patient_info, field_name)
+        if not force and not self._is_missing_or_invalid(field_name, current):
+            return False
+        setattr(self.patient_info, field_name, value)
+        self._field_sources[field_name] = source
+        return True
+
+    def _set_checkbox_fallback(self, field_name: str, value: bool, *, source: str) -> bool:
+        """Set checkbox field only if VLM did not already set it."""
+        if field_name in self._vlm_set_fields:
+            self._extracted_fields_trace["opencv_fallback"].append(
+                {"field": field_name, "value": value, "status": "skipped", "reason": "vlm_owned"}
+            )
+            return False
+        applied = self._set_patient_field(field_name, value, source=source, force=True)
+        self._extracted_fields_trace["opencv_fallback"].append(
+            {"field": field_name, "value": value, "status": "applied" if applied else "skipped"}
+        )
+        return applied
 
     def create_patient_directory(self) -> Path:
         """Create output directory for patient files.
@@ -842,7 +832,7 @@ class Form32Processor:
             self._document.save_as_json(output_path)
             logger.info(f"Saved docling document to: {output_path}")
             return output_path
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Failed to save docling document: {e}")
             return None
 
@@ -868,7 +858,7 @@ class Form32Processor:
             output_path.write_text(markdown_content, encoding="utf-8")
             logger.info(f"Saved docling markdown to: {output_path}")
             return output_path
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Failed to save docling markdown: {e}")
             return None
 
@@ -894,8 +884,32 @@ class Form32Processor:
 
             logger.info(f"Saved Form32 structured data to: {output_path}")
             return output_path
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Failed to save Form32 JSON: {e}")
+            return None
+
+    def save_extracted_fields_json(self, patient_dir: Path) -> Path | None:
+        """Save extraction provenance for VLM/regex/OpenCV field sourcing."""
+        logger.debug(f"[{datetime.now().isoformat()}] ENTER Form32Processor.save_extracted_fields_json(patient_dir={patient_dir})")
+        try:
+            final_sources: dict[str, str] = {}
+            for field_name, value in self.patient_info.model_dump().items():
+                if field_name in self._field_sources:
+                    final_sources[field_name] = self._field_sources[field_name]
+                elif self._is_missing_or_invalid(field_name, value):
+                    final_sources[field_name] = "default"
+                else:
+                    final_sources[field_name] = "default"
+
+            payload = dict(self._extracted_fields_trace)
+            payload["final_sources"] = final_sources
+
+            output_path = patient_dir / "extracted_fields.json"
+            output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+            logger.info(f"Saved extraction provenance to: {output_path}")
+            return output_path
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
+            logger.error(f"Failed to save extracted fields JSON: {e}")
             return None
 
     def process(self) -> dict[str, Any]:
@@ -906,34 +920,49 @@ class Form32Processor:
             patient_info, generated forms, and output directory.
         """
         logger.debug(f"[{datetime.now().isoformat()}] ENTER Form32Processor.process()")
+        process_start = perf_counter()
         try:
             # Extract text with docling (needed for validation and fallback)
+            convert_start = perf_counter()
             if not self._convert_with_docling():
+                self._log_phase_timing(
+                    "convert",
+                    perf_counter() - convert_start,
+                    self.config.phase_budget_convert_seconds,
+                )
                 return {"success": False, "errors": self.validation_errors}
+            self._log_phase_timing(
+                "convert",
+                perf_counter() - convert_start,
+                self.config.phase_budget_convert_seconds,
+            )
 
             # Validate and classify form
             if not self.validate_form():
                 return {"success": False, "errors": self.validation_errors}
 
-            # Extract patient information. Always use VLM extraction model for accuracy
-            if True:  # or self.config.use_vlm:
-                logger.info("Using VLM-based extraction")
-                if not self._extract_with_vlm():
-                    logger.warning("VLM extraction failed")
-                # Always run regex extraction to fill in fields VLM may have missed
-                # (VLM often doesn't extract exam_date, exam_time, exam_location)
-                # TODO: Remove this once VLM is verified as accurate
-                self._extract_with_patterns()
-                self._extract_location()
-            '''
-            else:
-                logger.info("Using regex-based extraction (use_vlm=False)")
-                self._extract_with_patterns()
-                self._extract_location()
-            '''
+            # Extract patient information. Always use VLM extraction model.
+            extraction_start = perf_counter()
+            logger.info("Using VLM-based extraction")
+            if not self._extract_with_vlm():
+                logger.warning("VLM extraction failed")
+            # Run regex and location extraction as fallback-only completion.
+            self._extract_with_patterns()
+            self._extract_location()
+            self._log_phase_timing(
+                "extraction",
+                perf_counter() - extraction_start,
+                self.config.phase_budget_extraction_seconds,
+            )
 
-            # Analyze checkboxes (always use OpenCV for boolean fields)
+            # Analyze checkboxes (OpenCV fallback for fields VLM did not set)
+            checkbox_start = perf_counter()
             self._analyze_checkboxes()
+            self._log_phase_timing(
+                "checkbox",
+                perf_counter() - checkbox_start,
+                self.config.phase_budget_checkbox_seconds,
+            )
 
             # Set hardcoded values
             self._set_hardcoded_values()
@@ -957,7 +986,7 @@ class Form32Processor:
                 )
                 controller.output_directory = patient_dir
                 generated_forms = controller.generate_forms()
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, TypeError) as e:
                 logger.error(f"Error generating forms: {e}")
 
             # Save docling document if verbose output is enabled
@@ -981,6 +1010,12 @@ class Form32Processor:
                 if saved_json_path:
                     form32_json_path = str(saved_json_path)
 
+            extracted_fields_path: str | None = None
+            if self.verbose:
+                saved_extracted_path = self.save_extracted_fields_json(patient_dir)
+                if saved_extracted_path:
+                    extracted_fields_path = str(saved_extracted_path)
+
             return {
                 "success": True,
                 "patient_info": self.patient_info,
@@ -990,8 +1025,15 @@ class Form32Processor:
                 "docling_document_path": docling_document_path,
                 "docling_markdown_path": docling_markdown_path,
                 "form32_json_path": form32_json_path,
+                "extracted_fields_path": extracted_fields_path,
             }
 
         except Exception as e:
             logger.exception(f"Processing failed: {e}")
             return {"success": False, "errors": [str(e)]}
+        finally:
+            self._log_phase_timing(
+                "total",
+                perf_counter() - process_start,
+                self.config.phase_budget_total_seconds,
+            )

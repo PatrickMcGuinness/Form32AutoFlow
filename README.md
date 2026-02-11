@@ -27,20 +27,11 @@ python3 -m venv venv
 
 ### 3. Activate Virtual Environment
 
-**Linux/WSL2/macOS:**
+**Linux/WSL2:**
 ```bash
-source venv/bin/activate
+conda activate form32gpu
 ```
 
-**Windows (Command Prompt):**
-```cmd
-venv\Scripts\activate
-```
-
-**Windows (PowerShell):**
-```powershell
-.\venv\Scripts\Activate.ps1
-```
 
 ### 4. Install Dependencies
 
@@ -62,12 +53,7 @@ The application auto-detects your platform and uses appropriate default paths.
 
 Override default paths using environment variables:
 
-| Variable | Description | Default (Linux) | Default (Windows) |
-|----------|-------------|-----------------|-------------------|
-| `TESSERACT_CMD` | Path to tesseract executable | `/usr/bin/tesseract` | `C:\Program Files\Tesseract-OCR\tesseract.exe` |
-| `POPPLER_PATH` | Path to poppler binaries | Not needed (uses system PATH) | `C:\Program Files\poppler-24.08.0\Library\bin` |
-| `FORM32_OUTPUT_DIR` | Output directory for processed forms | `~/pending_exams` | `C:\Pending Exams` |
-| `FORM32_PDF_PATH` | Source directory for PDF files | `~/form32pdf` | `c:/Users/billy_knott/Form32pdf/` |
+
 
 Example (Linux/WSL2):
 ```bash
@@ -116,7 +102,7 @@ If the `form32-docling` command is not in your system path:
 python -m form32_docling.cli path/to/your/form32.pdf
 ```
 
-### Option 2: Run Test Script
+### Run Test Script
 
 Process a sample PDF using the included test script:
 
@@ -126,9 +112,9 @@ python tests/test_process.py
 
 Edit `tests/test_process.py` to change the input PDF path.
 
-### Option 3: gen32form (Randomized Data Generation)
+### Utility: gen32form (Randomized Data Generation)
 
-The `gen32form` tool generates randomized JSON data based on the Form 32 templates and populates a fillable PDF for testing purposes.
+The `gen32form` tool generates randomized data based on the Form 32 templates and populates a fillable PDF for testing purposes.
 
 #### Usage
 ```bash

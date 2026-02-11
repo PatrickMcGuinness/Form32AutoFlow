@@ -2,11 +2,21 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader
 
 from form32_docling.config import Config
 from form32_docling.models import PatientInfo
+
+from .form_mappings import map_form68_fields
+from .pdf_form_utils import (
+    apply_field_values,
+    clone_template_to_writer,
+    extract_encryption_profile,
+    normalize_for_acrobat,
+    reencrypt_writer_if_needed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +38,7 @@ class Form68Generator:
         self.font_name = "Helvetica-Bold"
         self.font_size = 12
 
-    def _map_patient_info_to_fields(self, patient_info: PatientInfo) -> dict[str, str]:
+    def _map_patient_info_to_fields(self, patient_info: PatientInfo) -> dict[str, Any]:
         """Map PatientInfo attributes to Form 68 field names.
 
         Args:
@@ -37,43 +47,7 @@ class Form68Generator:
         Returns:
             Dictionary mapping PDF field names to values.
         """
-        fields = {
-            # Patient Info
-            "patient_name": patient_info.patient_name or "",
-            "patient_ssn": patient_info.ssn or "",
-            "date_of_injury": patient_info.date_of_injury or "",
-            "claim_number": patient_info.claim_number or "",
-
-            # Exam info
-            "exam_date": patient_info.exam_date or "",
-            "exam_location": patient_info.exam_location or "",
-
-            # Carrier info
-            "insurance_carrier": patient_info.insurance_carrier or "",
-
-            # Treating doctor info
-            "treating_doctor_name": patient_info.treating_doctor_name or "",
-            "treating_doctor_addr": patient_info.treating_doctor_address or "",
-            "treating_doctor_phone": patient_info.treating_doctor_phone or "",
-        }
-
-        # Handle injury evaluations (Page 2)
-        # We handle up to 4 evaluations as per form structure
-        for i, evaluation in enumerate(patient_info.injury_evaluations[:4]):
-            idx = i + 1
-            fields[f"condition_{idx}"] = evaluation.condition_text or ""
-
-            # Radio buttons / checkboxes for substantial factor
-            if evaluation.is_substantial_factor is True:
-                fields[f"factor_yes_{idx}"] = "/Yes"
-            elif evaluation.is_substantial_factor is False:
-                fields[f"factor_no_{idx}"] = "/Yes"
-
-            # Diagnosis codes
-            for c_idx, code in enumerate(evaluation.diagnosis_codes[:4]):
-                fields[f"icd_{idx}_{c_idx+1}"] = code or ""
-
-        return fields
+        return map_form68_fields(patient_info)
 
     def generate(self, patient_info: PatientInfo) -> Path:
         """Generate Form 68 PDF.
@@ -102,18 +76,14 @@ class Form68Generator:
         )
 
         reader = PdfReader(str(self.template_path))
-        writer = PdfWriter()
-
-        # Clone entire document structure (including AcroForm)
-        writer.clone_document_from_reader(reader)
+        encryption_profile = extract_encryption_profile(reader)
+        writer = clone_template_to_writer(reader)
 
         # Fill fields
         field_values = self._map_patient_info_to_fields(patient_info)
-
-        # update_page_form_field_values works on the writer's internal AcroForm
-        writer.update_page_form_field_values(writer.pages[0], field_values)
-        if len(writer.pages) > 1:
-            writer.update_page_form_field_values(writer.pages[1], field_values)
+        apply_field_values(writer, field_values, page_spec=None, auto_regenerate=None)
+        normalize_for_acrobat(writer)
+        reencrypt_writer_if_needed(writer, encryption_profile)
 
         with open(output_path, "wb") as f:
             writer.write(f)

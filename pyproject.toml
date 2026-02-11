@@ -5,21 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "form32-tools"
 version = "0.2.0"
-description = "Medical form processing and DWC form generation tools"
+description = "Medical DWC form processing and generation tools"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 authors = [
-    {name = "Patrick Murphy"}
+    {name = "Patrick"}
 ]
 keywords = ["medical", "forms", "ocr", "pdf", "docling", "dwc"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Healthcare Industry",
-    "License :: OSI Approved :: MIT License",
+    "License :: Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business",
     "Typing :: Typed",
 ]
@@ -81,7 +81,7 @@ include = ["form32_docling*"]
 "form32_docling.forms.templates" = ["*.pdf"]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py312"
 line-length = 88
 src = ["src", "tests"]
 
@@ -106,7 +106,7 @@ ignore = [
 known-first-party = ["form32_docling"]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.12"
 mypy_path = "src"
 explicit_package_bases = true
 warn_return_any = true

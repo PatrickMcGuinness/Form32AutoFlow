@@ -25,7 +25,7 @@ EXTRACTION_PATTERNS: dict[str, list[str]] = {
         r"DWC\s*#:\s*(\d+(?:-[A-Z]+)?)",
         r"DWC\s*claim\s*number.*?:\s*(\d+(?:-[A-Z]+)?)",
     ],
-    "ssn": [
+    "employee_ssn": [
         r"Social\s*Security\s*number.*?XXX\D*XX\D*(\d{4})",
         r"SSN.*?:\s*XXX\D*XX\D*(\d{4})",
     ],

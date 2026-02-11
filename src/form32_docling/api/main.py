@@ -61,8 +61,8 @@ async def process_form(file: UploadFile = File(...), db: Session = Depends(get_d
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        # Run Processor for extraction with VLM enabled
-        config = Config(use_vlm=True)
+        # Run processor with default VLM extraction behavior.
+        config = Config()
         processor = Form32Processor(temp_path, config=config, verbose=True)
 
         # Use the unified process method which handles extraction, validation, and directory setup
@@ -76,7 +76,7 @@ async def process_form(file: UploadFile = File(...), db: Session = Depends(get_d
         # Save to SQLite
         db_patient = Patient(
             patient_name=patient_info.patient_name or "Unknown",
-            ssn=patient_info.ssn,
+            ssn=patient_info.employee_ssn,
             exam_date=patient_info.exam_date,
             exam_location=patient_info.exam_location,
             patient_info_json=patient_info.model_dump_json(),

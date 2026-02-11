@@ -78,7 +78,6 @@ class TestConfig:
         result = config.to_dict()
         assert "base_directory" in result
         assert "pdf_path" in result
-        assert "use_vlm" in result
 
     @patch.dict(os.environ, {"FORM32_OUTPUT_DIR": "/custom/output"})
     def test_env_override_output_dir(self) -> None:

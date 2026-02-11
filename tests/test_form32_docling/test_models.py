@@ -143,7 +143,7 @@ class TestForm32Data:
         """Test conversion from PatientInfo to Form32Data."""
         info = PatientInfo(
             patient_name="John Doe",
-            ssn="123-45-6789",
+            employee_ssn="123-45-6789",
             exam_date="01/15/2024",
             exam_location="Test Clinic",
             has_certified_network=True,
@@ -174,13 +174,13 @@ class TestPatientInfo:
 
     def test_ssn_normalization(self) -> None:
         """Test SSN gets normalized on input."""
-        info = PatientInfo(ssn="123456789")
-        assert info.ssn == "123-45-6789"
+        info = PatientInfo(employee_ssn="123456789")
+        assert info.employee_ssn == "123-45-6789"
 
     def test_ssn_already_formatted(self) -> None:
         """Test SSN that's already formatted stays the same."""
-        info = PatientInfo(ssn="123-45-6789")
-        assert info.ssn == "123-45-6789"
+        info = PatientInfo(employee_ssn="123-45-6789")
+        assert info.employee_ssn == "123-45-6789"
 
     def test_is_valid(self) -> None:
         """Test is_valid method."""
@@ -213,7 +213,7 @@ class TestPatientInfo:
         info = PatientInfo.from_form32_data(data)
 
         assert info.patient_name == "John Doe"
-        assert info.ssn == "123-45-6789"
+        assert info.employee_ssn == "123-45-6789"
         assert info.insurance_carrier == "ABC Insurance"
         assert info.has_certified_network is True
         assert info.exam_date == "01/15/2024"

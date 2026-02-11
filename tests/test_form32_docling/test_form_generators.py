@@ -17,7 +17,7 @@ def sample_patient_info() -> PatientInfo:
     """Create sample patient info for testing."""
     return PatientInfo(
         patient_name="John Doe",
-        ssn="123-45-6789",
+        employee_ssn="123-45-6789",
         exam_date="01/15/2024",
         exam_time="10:00 AM",
         exam_location="Test Clinic",
@@ -63,10 +63,10 @@ class TestForm68Generator:
         generator = Form68Generator(Config())
         fields = generator._map_patient_info_to_fields(sample_patient_info)
 
-        assert fields["patient_name"] == "John Doe"
-        assert fields["patient_ssn"] == "123-45-6789"
-        assert fields["claim_number"] == "CLM12345"
-        assert fields["exam_date"] == "01/15/2024"
+        assert fields["1 Employee name last first middle"] == "John Doe"
+        assert fields["2 Social Security number"] == "123-45-6789"
+        assert fields["Insurance carrier claim number"] == "CLM12345"
+        assert fields["12 Date and time of appointment"] == "01/15/2024"
 
 
 class TestForm69Generator:
@@ -170,5 +170,4 @@ class TestFormGenerationController:
 
         assert "Form68" not in required
         assert "Form69" in required
-        assert "Form73" not in required
-
+        assert "Form73" in required

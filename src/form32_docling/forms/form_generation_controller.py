@@ -18,7 +18,7 @@ class FormGenerationController:
     Form generation rules:
     - Form68: Generated when purpose_box_c, purpose_box_d, or purpose_box_g is checked
     - Form69: Always generated
-    - Form73: Generated when purpose_box_e is checked
+    - Form73: Always generated (with Form69) but only needed when purpose_box_e is checked
     """
 
     def __init__(
@@ -70,9 +70,8 @@ class FormGenerationController:
         # Form69 is always required
         required.append("Form69")
 
-        # Form73: box E
-        if self.patient_info.purpose_box_e_checked:
-            required.append("Form73")
+        # Form73 is always generated together with Form69.
+        required.append("Form73")
 
         return required
 
@@ -112,4 +111,3 @@ class FormGenerationController:
 
         self.generated_forms = output_paths
         return output_paths
-

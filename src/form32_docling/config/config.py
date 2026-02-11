@@ -22,11 +22,16 @@ class Config:
 
     base_directory: Path = field(default_factory=custom_config.get_base_output_dir)
     pdf_path: Path = field(default_factory=custom_config.get_pdf_source_dir)
-    use_vlm: bool = False
     output_docling_document: bool = False  # Output docling document JSON when -v flag set
     output_docling_markdown: bool = False  # Output docling document as Markdown when -v flag set
     output_form32_json: bool = False       # Output structured Form32Data as JSON
-    docling_model: str | None = field(default_factory=custom_config.get_default_docling_model)  # Custom docling model
+    part5_checkbox_assist: bool = True     # Enable part5 checkbox assist template and override
+    docling_generate_page_images: bool = False  # Disable unless downstream code explicitly needs converter page images
+    docling_prefer_offline_cache: bool = True   # Prefer local Hugging Face cache to avoid runtime metadata checks
+    phase_budget_convert_seconds: float = 12.0
+    phase_budget_extraction_seconds: float = 50.0
+    phase_budget_checkbox_seconds: float = 3.0
+    phase_budget_total_seconds: float = 80.0
 
     # Designated Doctor Defaults
     doctor_phone: str = custom_config.DEFAULT_DOCTOR_PHONE
@@ -124,11 +129,16 @@ class Config:
         return {
             "base_directory": str(self.base_directory),
             "pdf_path": str(self.pdf_path),
-            "use_vlm": self.use_vlm,
             "output_docling_document": self.output_docling_document,
             "output_docling_markdown": self.output_docling_markdown,
             "output_form32_json": self.output_form32_json,
-            "docling_model": self.docling_model,
+            "part5_checkbox_assist": self.part5_checkbox_assist,
+            "docling_generate_page_images": self.docling_generate_page_images,
+            "docling_prefer_offline_cache": self.docling_prefer_offline_cache,
+            "phase_budget_convert_seconds": self.phase_budget_convert_seconds,
+            "phase_budget_extraction_seconds": self.phase_budget_extraction_seconds,
+            "phase_budget_checkbox_seconds": self.phase_budget_checkbox_seconds,
+            "phase_budget_total_seconds": self.phase_budget_total_seconds,
             "doctor_phone": self.doctor_phone,
             "doctor_license_type": self.doctor_license_type,
             "doctor_license_jurisdiction": self.doctor_license_jurisdiction,

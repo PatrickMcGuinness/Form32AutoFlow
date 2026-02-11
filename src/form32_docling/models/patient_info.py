@@ -341,7 +341,7 @@ class Form32Data(BaseModel):
         return cls(
             employee=EmployeeInfo(
                 patient_name=info.patient_name,
-                ssn=info.ssn,
+                ssn=info.employee_ssn,
                 date_of_birth=info.employee_date_of_birth,
                 address=info.employee_address,
                 county=info.employee_county,
@@ -492,7 +492,7 @@ class PatientInfo(BaseModel):
 
     # Part 1. Injured employee information
     patient_name: str | None = None
-    ssn: str | None = None
+    employee_ssn: str | None = None
     employee_address: str | None = None
     employee_county: str | None = None
     employee_primary_phone: str | None = None
@@ -516,6 +516,7 @@ class PatientInfo(BaseModel):
     adjuster_fax: str | None = None
     has_certified_network: bool = False
     has_political_subdivision: bool = False
+    network_name: str | None = None
     health_plan_name: str | None = None
 
     # Part 3. Treating doctor information
@@ -560,6 +561,12 @@ class PatientInfo(BaseModel):
     purpose_sib_from_date: str | None = None
     purpose_sib_to_date: str | None = None
     purpose_box_g_checked: bool = False
+    purpose_box_g_description: str | None = None
+
+    # Part 6. Requester Information
+    requester_type: str | None = None
+    requester_name: str | None = None
+    requester_date: str | None = None
 
     # Field 32
     dwc024_yes_checked: bool = False
@@ -628,7 +635,7 @@ class PatientInfo(BaseModel):
 
         return self.exam_date
 
-    @field_validator("ssn", mode="before")
+    @field_validator("employee_ssn", mode="before")
     @classmethod
     def normalize_ssn(cls, v: str | None) -> str | None:
         """Normalize SSN format to XXX-XX-XXXX."""
@@ -644,7 +651,7 @@ class PatientInfo(BaseModel):
         """Convert structured Form32Data to flat PatientInfo."""
         return cls(
             patient_name=data.employee.patient_name,
-            ssn=data.employee.ssn,
+            employee_ssn=data.employee.ssn,
             employee_address=data.employee.address,
             employee_county=data.employee.county,
             employee_primary_phone=data.employee.phone_primary,

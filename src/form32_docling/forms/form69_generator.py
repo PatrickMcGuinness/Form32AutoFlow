@@ -1,28 +1,24 @@
 """DWC Form-069 generator (Report of Medical Evaluation)."""
 
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader
 
 from form32_docling.config import Config
 from form32_docling.models import PatientInfo
 
+from .form_mappings import map_form69_fields
+from .pdf_form_utils import (
+    apply_field_values,
+    clone_template_to_writer,
+    extract_encryption_profile,
+    normalize_for_acrobat,
+    reencrypt_writer_if_needed,
+)
+
 logger = logging.getLogger(__name__)
-
-
-def _format_ssn_masked(ssn: str | None) -> str:
-    """Format SSN to show only last 4 digits."""
-    if not ssn:
-        return ""
-    digits = "".join(c for c in str(ssn) if c.isdigit())
-    if len(digits) == 9:
-        return f"XXX-XX-{digits[-4:]}"
-    if len(digits) == 4:
-        return f"XXX-XX-{digits}"
-    return ssn
 
 
 class Form69Generator:
@@ -47,19 +43,6 @@ class Form69Generator:
         self.font_name = "Helvetica-Bold"
         self.font_size = 8
 
-    def _split_date(self, date_str: str | None) -> tuple[str, str, str]:
-        """Split date string into (month, day, year)."""
-        if not date_str:
-            return "", "", ""
-
-        for fmt in ["%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y"]:
-            try:
-                dt = datetime.strptime(date_str, fmt)
-                return f"{dt.month:02d}", f"{dt.day:02d}", f"{dt.year}"
-            except ValueError:
-                continue
-        return "", "", ""
-
     def _map_patient_info_to_fields(self, info: PatientInfo) -> dict[str, Any]:
         """Map PatientInfo attributes to Form 69 field names.
 
@@ -69,41 +52,7 @@ class Form69Generator:
         Returns:
             Dictionary mapping field names to values.
         """
-        month, day, year = self._split_date(info.exam_date)
-
-        # Aggregate diagnosis codes from evaluations
-        diag_codes = []
-        for eval in info.injury_evaluations:
-            diag_codes.extend([c for c in eval.diagnosis_codes if c])
-        diag_codes_str = ", ".join(diag_codes[:10]) # Limit to 10 for display
-
-        fields: dict[str, Any] = {
-            "1 Workers Compensation Insurance Carrier": info.insurance_carrier,
-            "2 Employers Name": info.employer_name,
-            "3 Employers Address  Street or PO Box City State Zip": info.employer_address,
-            "4 Injured Employees Name First Middle Last": info.patient_name,
-            "5 Date of Injury": info.date_of_injury,
-            "6 Social Security Number": _format_ssn_masked(info.ssn),
-            "7 Employees Phone Number": info.employee_primary_phone,
-            "8 Employees Address  Street or PO Box City State Zip": info.employee_address,
-            "9 Certifying Doctors Name and License Type": f"{info.doctor_name}, {info.doctor_license_type}" if info.doctor_name else "",
-            "10 Certifying Doctors License Number and Jurisdiction": f"{info.doctor_license_number} {info.doctor_license_jurisdiction}" if info.doctor_license_number else "",
-            "11 Doctors Phone": info.doctor_phone,
-            "11 Doctors Fax": info.doctor_fax,
-            "12 Certifying Doctors Address Street or PO Box City State Zip": info.doctor_address,
-            "13. Designated Doctor selected by DWC": "/Yes",  # Explicitly Designated Doctor
-            "14. Month - Date of Exam": month,
-            "14. Day - Date of Exam": day,
-            "14. Year - Date of Exam": year,
-            "15 Diagnosis Codes": diag_codes_str,
-            "DWC Claim": info.dwc_number,
-            "Carrier Claim": info.claim_number,
-            # Placeholder for Certification - usually filled manually or via GUI in future phases
-            # For now we pre-fill the doctor info
-            "18. Date of Certification": info.exam_date or "",
-        }
-
-        return fields
+        return map_form69_fields(info)
 
     def generate(self, patient_info: PatientInfo) -> Path:
         """Generate Form-069 PDF by filling form fields.
@@ -135,13 +84,13 @@ class Form69Generator:
         )
 
         reader = PdfReader(str(self.template_path))
-        writer = PdfWriter()
-
-        # Clone entire document structure (including AcroForm)
-        writer.clone_document_from_reader(reader)
+        encryption_profile = extract_encryption_profile(reader)
+        writer = clone_template_to_writer(reader)
 
         field_values = self._map_patient_info_to_fields(patient_info)
-        writer.update_page_form_field_values(writer.pages[0], field_values)
+        apply_field_values(writer, field_values, page_spec=0, auto_regenerate=None)
+        normalize_for_acrobat(writer)
+        reencrypt_writer_if_needed(writer, encryption_profile)
 
         with open(output_path, "wb") as f:
             writer.write(f)

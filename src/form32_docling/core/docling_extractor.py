@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from form32_docling.config.form32_templates import (
     DWC032_part1_template,
     DWC032_part3_template,
+    DWC032_part5_checkbox_assist_template,
     DWC032_part5_template,
     DWC032_part6_template,
     exam_order_page_two_template,
@@ -268,18 +269,28 @@ class Form32Extractor:
     handled separately via OpenCV analysis.
     """
 
-    def __init__(self, *, verbose: bool = False, use_gpu: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        verbose: bool = False,
+        use_gpu: bool = True,
+        use_part5_checkbox_assist: bool = False,
+    ) -> None:
         """Initialize the extractor.
 
         Args:
             verbose: Enable verbose logging.
             use_gpu: Enable GPU acceleration (default: True).
+            use_part5_checkbox_assist: Use enhanced Part 5 checkbox template.
         """
-        logger.debug(f"[{datetime.now().isoformat()}] ENTER Form32Extractor.__init__(verbose={verbose}, use_gpu={use_gpu})")
+        logger.debug(
+            f"[{datetime.now().isoformat()}] ENTER Form32Extractor.__init__(verbose={verbose}, use_gpu={use_gpu}, use_part5_checkbox_assist={use_part5_checkbox_assist})"
+        )
         import os
 
         self.verbose = verbose
         self.use_gpu = use_gpu
+        self.use_part5_checkbox_assist = use_part5_checkbox_assist
         self._extractor: DocumentExtractor | None = None
 
         # Set environment variable for GPU acceleration
@@ -324,44 +335,39 @@ class Form32Extractor:
         else:
             logger.info(f"Extracting all pages with VLM: {pdf_path}")
 
-        try:
-            # Build extraction kwargs
-            extract_kwargs: dict[str, Any] = {
-                "source": str(pdf_path),
-                "template": Form32TextFields,
-            }
+        # Build extraction kwargs
+        extract_kwargs: dict[str, Any] = {
+            "source": str(pdf_path),
+            "template": Form32TextFields,
+        }
 
-            # Add page_range if specific pages requested
-            # Docling page_range is [start, end] inclusive
-            if page_numbers:
-                page_range = (min(page_numbers), max(page_numbers))
-                extract_kwargs["page_range"] = page_range
-                logger.info(f"Using page_range: {page_range}")
+        # Add page_range if specific pages requested
+        # Docling page_range is [start, end] inclusive
+        if page_numbers:
+            page_range = (min(page_numbers), max(page_numbers))
+            extract_kwargs["page_range"] = page_range
+            logger.info(f"Using page_range: {page_range}")
 
-            # Time the VLM extraction (typically the slowest step)
-            extract_start = datetime.now()
-            logger.debug(f"[{extract_start.isoformat()}] DOCLING_VLM_EXTRACT_START")
+        # Time the VLM extraction (typically the slowest step)
+        extract_start = datetime.now()
+        logger.debug(f"[{extract_start.isoformat()}] DOCLING_VLM_EXTRACT_START")
 
-            result = self.extractor.extract(**extract_kwargs)
+        result = self.extractor.extract(**extract_kwargs)
 
-            extract_end = datetime.now()
-            extract_elapsed = (extract_end - extract_start).total_seconds()
-            logger.info(f"[{extract_end.isoformat()}] DOCLING_VLM_EXTRACT_END - elapsed: {extract_elapsed:.2f}s")
+        extract_end = datetime.now()
+        extract_elapsed = (extract_end - extract_start).total_seconds()
+        logger.info(f"[{extract_end.isoformat()}] DOCLING_VLM_EXTRACT_END - elapsed: {extract_elapsed:.2f}s")
 
-            # Time the aggregation step
-            agg_start = datetime.now()
-            aggregated = self._aggregate_page_results(result.pages)
-            agg_elapsed = (datetime.now() - agg_start).total_seconds()
-            logger.debug(f"DOCLING_VLM_AGGREGATE - elapsed: {agg_elapsed:.2f}s")
+        # Time the aggregation step
+        agg_start = datetime.now()
+        aggregated = self._aggregate_page_results(result.pages)
+        agg_elapsed = (datetime.now() - agg_start).total_seconds()
+        logger.debug(f"DOCLING_VLM_AGGREGATE - elapsed: {agg_elapsed:.2f}s")
 
-            if self.verbose:
-                logger.debug(f"Aggregated extraction result: {aggregated}")
+        if self.verbose:
+            logger.debug(f"Aggregated extraction result: {aggregated}")
 
-            return Form32TextFields.model_validate(aggregated)
-
-        except Exception as e:
-            logger.error(f"DocumentExtractor extraction failed: {e}")
-            raise
+        return Form32TextFields.model_validate(aggregated)
 
     def _aggregate_page_results(self, pages: list[Any]) -> dict[str, Any]:
         """Aggregate extracted data from multiple pages.
@@ -440,6 +446,8 @@ class Form32Extractor:
                 continue
 
             template = TEMPLATE_MAP[page_type]
+            if page_type == "DWC032_part5" and self.use_part5_checkbox_assist:
+                template = DWC032_part5_checkbox_assist_template
             logger.info(f"Page {page_num} ({page_type}): Using template with {len(template.get('Parts', {}))} parts")
 
             try:
@@ -466,7 +474,7 @@ class Form32Extractor:
                     else:
                         logger.warning(f"Page {page_num} ({page_type}): No data extracted")
 
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, TypeError) as e:
                 logger.error(f"Page {page_num} ({page_type}): Extraction failed: {e}")
                 continue
 

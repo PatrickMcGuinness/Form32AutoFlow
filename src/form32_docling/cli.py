@@ -47,31 +47,16 @@ def main() -> int:
         version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
-        "-m",
-        "--model",
-        type=str,
-        help="Docling model to use (e.g., granite-docling-258M)",
-    )
-    parser.add_argument(
         "--output-json",
         action="store_true",
         help="Output structured Form32Data as JSON",
     )
-
-    # VLM extraction flags (mutually exclusive)
-    vlm_group = parser.add_mutually_exclusive_group()
-    vlm_group.add_argument(
-        "--use-vlm",
-        action="store_true",
-        dest="use_vlm",
-        default=None,
-        help="Use VLM-based DocumentExtractor for field extraction (default)",
-    )
-    vlm_group.add_argument(
-        "--no-vlm",
+    parser.add_argument(
+        "--no-part5-checkbox-assist",
         action="store_false",
-        dest="use_vlm",
-        help="Use regex-based extraction instead of VLM",
+        dest="part5_checkbox_assist",
+        default=None,
+        help="Disable enhanced Part 5 checkbox extraction/override behavior",
     )
 
     args = parser.parse_args()
@@ -113,14 +98,10 @@ def main() -> int:
         config.output_form32_json = True
     if args.output_json:
         config.output_form32_json = True
-    if args.model:
-        config.docling_model = args.model
-    if args.use_vlm is not None:
-        config.use_vlm = args.use_vlm
+    if args.part5_checkbox_assist is not None:
+        config.part5_checkbox_assist = args.part5_checkbox_assist
 
-    # Log extraction mode
-    extraction_mode = "VLM" if config.use_vlm else "regex"
-    print(f"Processing: {args.pdf_path} (extraction mode: {extraction_mode})")
+    print(f"Processing: {args.pdf_path} (extraction mode: VLM)")
 
     processor = Form32Processor(
         args.pdf_path,
