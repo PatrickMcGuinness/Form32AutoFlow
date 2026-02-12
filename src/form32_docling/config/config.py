@@ -73,7 +73,7 @@ class Config:
 
     @staticmethod
     def get_project_root() -> Path:
-        """Get the root directory of the Form32reader project."""
+        """Get the root directory of the Form32AutoFlow project."""
         return Path(__file__).parent.parent.parent.parent
 
     @property

@@ -10,6 +10,8 @@ from form32_docling.api.main import app, get_db
 
 # Setup Test Database
 TEST_DB_PATH = Path("test_form32_gui.db")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TEST_PDF_PATH = PROJECT_ROOT / "WorkersCompData" / "LEROY-3pager.pdf"
 
 
 def override_get_db() -> Generator[Session]:
@@ -40,7 +42,7 @@ def test_health_check() -> None:
 def test_process_partial_data() -> None:
     # Test Upload with a file that might be missing data (simulated by a "wrong" file or partial content)
     # Here we just want to ensure it doesn't return 500
-    test_pdf = Path("/home/patrickm/AIDev/OCRtools/Form32reader/WorkersCompData/LEROY-3pager.pdf")
+    test_pdf = TEST_PDF_PATH
     if not test_pdf.exists():
         pytest.skip("Test PDF not found")
 
@@ -60,7 +62,7 @@ def test_process_partial_data() -> None:
 
 def test_process_and_flow() -> None:
     # 1. Test Upload & Process
-    test_pdf = Path("/home/patrickm/AIDev/OCRtools/Form32reader/WorkersCompData/LEROY-3pager.pdf")
+    test_pdf = TEST_PDF_PATH
     if not test_pdf.exists():
         pytest.skip("Test PDF not found")
 
@@ -95,6 +97,23 @@ def test_process_and_flow() -> None:
         "patient_info": {
             **detail["patient_info"],
             "patient_name": "LEROY TEST EDIT",
+            "purpose_box_a_checked": True,
+            "purpose_mmi_date": "2026-02-11",
+            "purpose_box_b_checked": True,
+            "purpose_ir_mmi_date": "2026-02-10",
+            "purpose_box_c_checked": True,
+            "extent_of_injury": "Slip and fall while lifting equipment",
+            "purpose_box_d_checked": True,
+            "purpose_disability_from_date": "2026-01-15",
+            "purpose_disability_to_date": "2026-01-29",
+            "purpose_box_e_checked": True,
+            "purpose_rtw_from_date": "2026-02-01",
+            "purpose_rtw_to_date": "2026-02-14",
+            "purpose_box_f_checked": True,
+            "purpose_sib_from_date": "2026-02-15",
+            "purpose_sib_to_date": "2026-03-01",
+            "purpose_box_g_checked": True,
+            "purpose_box_g_description": "Clarify additional work restrictions",
             "injury_evaluations": [
                 {
                     "condition_text": "Lumbar Discopathy",
@@ -113,6 +132,23 @@ def test_process_and_flow() -> None:
     response = client.get(f"/api/patients/{patient_id}")
     updated_detail = response.json()
     assert updated_detail["patient_info"]["patient_name"] == "LEROY TEST EDIT"
+    assert updated_detail["patient_info"]["purpose_box_a_checked"] is True
+    assert updated_detail["patient_info"]["purpose_mmi_date"] == "2026-02-11"
+    assert updated_detail["patient_info"]["purpose_box_b_checked"] is True
+    assert updated_detail["patient_info"]["purpose_ir_mmi_date"] == "2026-02-10"
+    assert updated_detail["patient_info"]["purpose_box_c_checked"] is True
+    assert updated_detail["patient_info"]["extent_of_injury"] == "Slip and fall while lifting equipment"
+    assert updated_detail["patient_info"]["purpose_box_d_checked"] is True
+    assert updated_detail["patient_info"]["purpose_disability_from_date"] == "2026-01-15"
+    assert updated_detail["patient_info"]["purpose_disability_to_date"] == "2026-01-29"
+    assert updated_detail["patient_info"]["purpose_box_e_checked"] is True
+    assert updated_detail["patient_info"]["purpose_rtw_from_date"] == "2026-02-01"
+    assert updated_detail["patient_info"]["purpose_rtw_to_date"] == "2026-02-14"
+    assert updated_detail["patient_info"]["purpose_box_f_checked"] is True
+    assert updated_detail["patient_info"]["purpose_sib_from_date"] == "2026-02-15"
+    assert updated_detail["patient_info"]["purpose_sib_to_date"] == "2026-03-01"
+    assert updated_detail["patient_info"]["purpose_box_g_checked"] is True
+    assert updated_detail["patient_info"]["purpose_box_g_description"] == "Clarify additional work restrictions"
     assert len(updated_detail["patient_info"]["injury_evaluations"]) == 1
     assert updated_detail["patient_info"]["injury_evaluations"][0]["is_substantial_factor"] is True
 

@@ -128,6 +128,77 @@ function WorkbenchContent() {
     );
 
     const info = patient.patient_info;
+    const hasValue = (value) => {
+        if (value === null || value === undefined) return false;
+        return String(value).trim().length > 0;
+    };
+
+    const formatDisplayDate = (value) => {
+        if (!hasValue(value)) return null;
+
+        const rawValue = String(value).trim();
+        const isoDateMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoDateMatch) {
+            const [, year, month, day] = isoDateMatch;
+            return `${month}/${day}/${year}`;
+        }
+
+        return rawValue;
+    };
+
+    const formatDateRange = (fromDate, toDate) => {
+        const from = formatDisplayDate(fromDate);
+        const to = formatDisplayDate(toDate);
+        if (!from && !to) return null;
+        if (from && to) return `From ${from} to ${to}`;
+        if (from) return `From ${from}`;
+        return `To ${to}`;
+    };
+
+    const purposeRows = [
+        {
+            key: "a",
+            label: "A. Maximum medical improvement (MMI)",
+            checked: info.purpose_box_a_checked,
+            detail: hasValue(info.purpose_mmi_date) ? `Statutory MMI date: ${formatDisplayDate(info.purpose_mmi_date)}` : null,
+        },
+        {
+            key: "b",
+            label: "B. Impairment rating (IR)",
+            checked: info.purpose_box_b_checked,
+            detail: hasValue(info.purpose_ir_mmi_date) ? `MMI date (IR): ${formatDisplayDate(info.purpose_ir_mmi_date)}` : null,
+        },
+        {
+            key: "c",
+            label: "C. Extent of injury",
+            checked: info.purpose_box_c_checked,
+            detail: hasValue(info.extent_of_injury) ? `Description of accident/incident: ${String(info.extent_of_injury).trim()}` : null,
+        },
+        {
+            key: "d",
+            label: "D. Disability - direct result",
+            checked: info.purpose_box_d_checked,
+            detail: formatDateRange(info.purpose_disability_from_date, info.purpose_disability_to_date),
+        },
+        {
+            key: "e",
+            label: "E. Return to work",
+            checked: info.purpose_box_e_checked,
+            detail: formatDateRange(info.purpose_rtw_from_date, info.purpose_rtw_to_date),
+        },
+        {
+            key: "f",
+            label: "F. Return to work (supplemental income benefits)",
+            checked: info.purpose_box_f_checked,
+            detail: formatDateRange(info.purpose_sib_from_date, info.purpose_sib_to_date),
+        },
+        {
+            key: "g",
+            label: "G. Other similar issues",
+            checked: info.purpose_box_g_checked,
+            detail: hasValue(info.purpose_box_g_description) ? `Description of issues: ${String(info.purpose_box_g_description).trim()}` : null,
+        },
+    ];
 
     return (
         <div className="fade-in pb-20">
@@ -252,7 +323,7 @@ function WorkbenchContent() {
                     <div className="col-span-12 md:col-span-8">
                         <section className="card shadow-md bg-white border-slate-200">
                             <div className="mb-10 border-b border-slate-100 pb-6">
-                                <h3 className="text-2xl font-bold text-slate-900 mb-2">Doctor's Evaluation</h3>
+                                <h3 className="text-2xl font-bold text-slate-900 mb-2">Doctor&apos;s Evaluation</h3>
                                 <p className="text-slate-500 max-w-2xl text-sm leading-relaxed">
                                     Identify and evaluate additional claimed diagnoses. Determine if the compensable injury was a
                                     <span className="font-bold text-slate-700"> substantial factor</span> in bringing about these conditions.
@@ -260,6 +331,35 @@ function WorkbenchContent() {
                             </div>
 
                             <div className="space-y-8">
+                                <div className="p-6 rounded-2xl border border-slate-200 bg-slate-50/30">
+                                    <div className="flex items-center justify-between mb-6">
+                                        <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Purpose of Examination (Part 5)</span>
+                                        <div className="h-px flex-grow mx-4 bg-slate-200"></div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {purposeRows.map((row) => (
+                                            <div key={row.key} className="rounded-xl border border-slate-200 bg-white p-3">
+                                                <label className="flex items-start gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                                                        checked={Boolean(row.checked)}
+                                                        disabled
+                                                        readOnly
+                                                    />
+                                                    <span className="text-sm font-semibold text-slate-800 leading-snug">
+                                                        {row.label}
+                                                    </span>
+                                                </label>
+                                                {row.detail && (
+                                                    <p className="mt-2 pl-7 text-xs text-slate-600 leading-relaxed">{row.detail}</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 {info.injury_evaluations.map((evalItem, idx) => (
                                     <div key={idx} className="p-6 rounded-2xl border border-slate-200 bg-slate-50/30 hover:shadow-sm transition-shadow">
                                         <div className="flex items-center justify-between mb-6">

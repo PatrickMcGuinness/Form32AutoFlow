@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 # Add src to path
-src_path = Path(__file__).parent / "Form32reader" / "src"
+src_path = Path(__file__).resolve().parents[1] / "src"
 sys.path.append(str(src_path))
 
 from form32_docling.config import Config  # noqa: E402

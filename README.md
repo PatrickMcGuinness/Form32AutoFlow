@@ -1,283 +1,191 @@
-# Form32reader
+# Form32AutoFlow
 
-An application for processing Texas Department of Insurance (TDI) Form 32 PDFs and doctor examination orders, then automatically generating associated medical forms
-(DWC-068, DWC-069, DWC-073).
+Tools for processing Texas DWC-032 PDFs and generating downstream DWC forms.
 
-## Prerequisites
+## What It Does
 
-Before running the application, install the following system dependencies.
+`form32-docling` runs a hybrid pipeline:
 
-See associated TOML file for dependencies.
+1. Converts PDF pages with `docling` (OCR/layout).
+2. Extracts structured fields with Docling `DocumentExtractor` (VLM templates by page type).
+3. Runs regex/location fallback for missing text fields.
+4. Runs OpenCV checkbox analysis as fallback (and optional Part 5 override assist).
+5. Generates output PDFs:
+   - `DWC068` when purpose C, D, or G is checked.
+   - `DWC069` always.
+   - `DWC073` always.
 
+## Requirements
 
-## Installation
+- Python `>= 3.12`
+- Poppler utilities available on PATH (`pdf2image` dependency for checkbox analysis)
+- Node.js (only if using the Next.js GUI source directly)
 
-### 1. Clone the Repository
+## Install
+
+- Create conda env form32gpu with dependencies from TOML installed.
 
 ```bash
-git clone git@github.com:BillyKnott/Form32reader.git
-cd Form32reader
-```
-
-### 2. Create Virtual Environment
-
-```bash
-python3 -m venv venv
-```
-
-### 3. Activate Virtual Environment
-
-**Linux/WSL2:**
-```bash
+cd Form32AutoFlow
 conda activate form32gpu
-```
-
-
-### 4. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 5. Install Package in Development Mode
-
-```bash
 pip install -e .
 ```
 
-## Configuration
-
-The application auto-detects your platform and uses appropriate default paths.
-
-### Environment Variables (Optional)
-
-Override default paths using environment variables:
-
-
-
-Example (Linux/WSL2):
-```bash
-export FORM32_OUTPUT_DIR="/mnt/d/ProcessedForms"
-export FORM32_PDF_PATH="/mnt/d/Form32PDFs"
-```
-
-### Logging Configuration
-
-Log level is controlled via environment variable or CLI flag:
-
-| Method | Priority | Effect |
-|--------|----------|--------|
-| `-v` / `--verbose` flag | Highest | DEBUG level logging |
-| `FORM32_LOG_LEVEL` env var | Medium | Set to `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| Default | Lowest | INFO level |
-
-Example:
-```bash
-# Set log level via environment variable
-export FORM32_LOG_LEVEL=DEBUG
-
-# Or use -v flag for verbose output (takes precedence)
-form32-docling -v path/to/form.pdf
-```
-
-## Usage
-
-### Option 1: Form32 Docling CLI
-
-The `form32-docling` package provides a dedicated command-line interface for modern document processing using the `docling` library.
-
-#### Basic Usage
-```bash
-form32-docling path/to/your/form32.pdf
-```
-
-#### Advanced Options
-- `-o`, `--output-dir <path>`: Set a custom output directory (overrides default).
-- `-v`, `--verbose`: Enable detailed debug logging.
-- `--version`: Show package version.
-
-#### Alternative Execution
-If the `form32-docling` command is not in your system path:
-```bash
-python -m form32_docling.cli path/to/your/form32.pdf
-```
-
-### Run Test Script
-
-Process a sample PDF using the included test script:
+Optional extras:
 
 ```bash
-python tests/test_process.py
+pip install -e ".[dev]"        # pytest, ruff, mypy
+pip install -e ".[api]"        # fastapi, uvicorn, sqlalchemy
+pip install -e ".[ui]"         # PyQt6
+pip install -e ".[vlm]"        # torch, torchvision, qwen-vl-utils
 ```
 
-Edit `tests/test_process.py` to change the input PDF path.
+`gen32form` also imports `faker` (currently in `requirements-gpu.lock`, not in `pyproject.toml`), so install it when using that CLI:
 
-### Utility: gen32form (Randomized Data Generation)
+```bash
+pip install faker
+```
 
-The `gen32form` tool generates randomized data based on the Form 32 templates and populates a fillable PDF for testing purposes.
+Core runtime dependencies declared in `pyproject.toml`:
 
-#### Usage
+- `docling`
+- `reportlab`
+- `pypdf`
+- `opencv-python`
+- `numpy`
+- `pillow`
+- `pdf2image`
+- `pydantic`
+- `python-dotenv`
+
+## Commands
+
+Installed console scripts:
+
+- `form32-docling` -> process a DWC-032 PDF, fill info fields to populate DWC069, 073, and 068.
+- `gen32form` -> generate randomized filled DWC-032
+- `form32-db` -> manage GUI SQLite records
+- `form32-server` -> start FastAPI backend (and static GUI if built)
+
+### `form32-docling`
+
+```bash
+form32-docling path/to/input.pdf [options]
+```
+
+Options:
+
+- `-o, --output-dir PATH` override output base directory
+- `-v, --verbose` verbose logging + debug artifacts
+- `--output-json` write `form32_data.json`
+- `--no-part5-checkbox-assist` disable Part 5 checkbox assist/override behavior
+- `--version`
+
+Behavior details:
+
+- Input must exist and end with `.pdf`.
+- Processing uses VLM extraction mode.
+- On success, CLI prints output directory, copied source path, generated form paths, and optional debug artifact paths.
+- Logs are written to `form32_processing.log`.
+
+### `gen32form`
+
 ```bash
 gen32form [-i INPUT_PDF] [-o OUTPUT_DIR] [-v]
 ```
 
-#### Options:
-- `-i`, `--input`: Specific input PDF form path (default: `Form32reader/WorkersCompData/dwc032desdoc-fillable.pdf`).
-- `-o`, `--output-dir`: Directory where the randomized PDF will be saved (default: current directory `.`).
-- `-v`, `--verbose`: Enable detailed debug logging, showing the constructed JSON data.
+- Default input: `Form32reader/WorkersCompData/dwc032desdoc-fillable.pdf`
+- Writes `DWC032_randomized_<4digits>.pdf` into output directory.
 
-#### What it does:
-1. Generates 10 random entries for every field in the Form 32 template.
-2. Randomly selects one entry per field to create a complete JSON record.
-3. Populates the provided fillable PDF with this data.
-4. Saves the resulting PDF with a randomized filename (e.g., `DWC032_randomized_2481.pdf`) in the specified output directory.
+### `form32-db`
 
-### Option 4: form32-db (Database Management)
-
-The `form32-db` tool provides a command-line interface for managing the SQLite database used by the GUI (`~/.form32_gui.db`).
-
-#### Usage
 ```bash
 form32-db [list|delete|clean]
 ```
 
-#### Commands:
-- `list`: Show all patient records stored in the database.
-- `delete <ID>`: Remove a specific patient record and its associated injury evaluations by ID.
-- `clean`: Remove **all** records from the database (requires confirmation).
+- Database path: `~/.form32_gui.db`
+- `clean` prompts for confirmation.
 
-#### Execution:
-Run from the project root using the conda environment:
-```bash
-conda run -n form32gpu form32-db list
-```
-Or via the Python module:
-```bash
-conda run -n form32gpu python -m form32_docling.cli_db list
-```
-
-## Output
-
-Processed files are saved to the output directory in subdirectories named:
-
-```
-{date} {PATIENT_NAME} {CITY}/
-├── [Original Form 32 PDF]
-├── DWC-068.pdf  (if boxes C, D, or G checked)
-├── DWC-069.pdf  (always generated)
-└── DWC-073.pdf  (if box E checked)
-```
-
-Default output locations:
-- **Linux/WSL2**: `~/pending_exams/`
-- **Windows**: `C:\Pending Exams\`
-
-## Building Executable
-
-> [!NOTE]
-> Executable building for the new Docling-based version is currently under development.
-
-## Project Structure
-
-```
-Form32reader/
-├── src/
-│   └── form32_docling/      # Docling-based processor (Recommended)
-│       ├── config/          # Configuration settings
-│       ├── core/            # Processing logic
-│       ├── forms/           # Form generators and templates
-│       ├── models/          # Data models
-│       └── utils/           # Utility functions
-├── pyproject.toml           # Package configuration and entry points
-└── tests/
-    └── test_process.py      # Test script
-```
-
-## Running GUI and API
-
-The application includes a FastAPI backend and a Next.js frontend.
-
-### 1. Start the API Server
-
-The API handles document processing and database management. It can be run using the standalone command:
+### `form32-server`
 
 ```bash
-conda run -n form32gpu form32-server
+form32-server
 ```
 
-Or manually:
+- Runs FastAPI on `127.0.0.1:8000` with reload enabled by default.
+- Set `FORM32_SERVER_HOST` and `FORM32_SERVER_PORT` to override bind host/port.
+- Health endpoint: `GET /api/health`
+- If `src/form32_docling/gui/out` exists, FastAPI serves the static UI at `/`.
+
+## Output Layout
+
+Each processed case is written to a patient directory under the configured base output directory:
+
+```text
+<patient_name_with_underscores>_<exam_city>_<M.D.YY>/
+```
+
+Typical contents:
+
+```text
+FORM32 <PATIENT>.pdf
+DWC068 <PATIENT>.pdf         # when purpose C/D/G selected
+DWC069 <PATIENT>.pdf         # always
+DWC073 <PATIENT>.pdf         # always
+```
+
+Verbose/debug artifacts:
+
+- `docling_document.json` (with `-v`)
+- `docling_document.md` (with `-v`)
+- `extracted_fields.json` (verbose processor run)
+- `form32_data.json` (with `--output-json` or `-v`)
+
+## Configuration
+
+Environment variables:
+
+- `FORM32_OUTPUT_DIR` base output directory
+- `FORM32_PDF_PATH` default PDF source directory
+- `FORM32_LOG_LEVEL` logging level when `-v` is not set
+- `FORM32_DOCTOR_PHONE` default designated doctor phone
+- `FORM32_DOCTOR_LICENSE_TYPE` default designated doctor license type
+- `FORM32_DOCTOR_LICENSE_JURISDICTION` default designated doctor license jurisdiction
+
+Defaults from code:
+
+- Linux/WSL output: `~/AIDev/Form32_output`
+- Linux/WSL PDF source: `~/AIDev/Form32_pdf`
+- Windows output: `D:\AIDev\Form32_ouput`
+- Windows PDF source: `D:\AIDev\Form32_pdf`
+
+## API + GUI Notes
+
+FastAPI endpoints include:
+
+- `POST /api/process`
+- `GET /api/patients`
+- `GET /api/patients/{id}`
+- `PATCH /api/patients/{id}`
+- `POST /api/generate/{id}`
+- `GET /api/download?path=...`
+- `DELETE /api/patients/{id}`
+- `DELETE /api/patients`
+
+The Next.js UI uses relative `/api/*` fetch calls. The supported deployment path is to build the UI and serve it from `form32-server`.
+
 ```bash
-conda run -n form32gpu python -m form32_docling.api.main
+cd src/form32_docling/gui
+npm install
+npm run build
+cd ../../..
+form32-server
 ```
 
-The API will be available at `http://localhost:8000`. You can verify it's running by visiting `http://localhost:8000/api/health`.
+Then open `http://localhost:8000`.
 
-### 2. Start the GUI Frontend
-
-From the `Form32reader/src/form32_docling/gui` directory:
+## Tests
 
 ```bash
-npm run dev
+pytest
 ```
-
-The GUI will be available at `http://localhost:3000`.
-
-### 3. Workflow
-1. Open the Dashboard at `http://localhost:3000`.
-2. Upload a Form 32 PDF.
-3. Review and edit extracted data in the Workbench.
-4. Generate final PDFs (DWC-068, DWC-069, DWC-073).
-
-
-### Unified Production Deployment (Recommended)
-
-For cloud or production deployment, you can serve the frontend directly from the FastAPI server. This simplifies the architecture to a single running process.
-
-1. **Build the Frontend**:
-   ```bash
-   cd src/form32_docling/gui
-   npm install
-   npm run build
-   ```
-   This generates a static `out/` directory.
-
-2. **Start the Unified Server**:
-   ```bash
-   # From project root
-   conda run -n form32gpu form32-server
-   ```
-   The GUI will now be available at `http://localhost:8000` (the same port as the API).
-
----
-
-## Troubleshooting
-
-
-
-### PDF Processing Fails
-
-- Verify the PDF is a valid Form 32 document
-- Check that the PDF is not password-protected
-- Try running with `verbose=True` for detailed logging
-- Check `form32_processing.log` for error details
-
-### GUI Not Working in WSL2
-
-If running the GUI in WSL2, you need an X server:
-
-1. Install an X server on Windows (VcXsrv, X410, or use WSLg on Windows 11)
-2. Set the DISPLAY variable:
-   ```bash
-   export DISPLAY=:0
-   ```
-
-Alternatively, use command-line processing instead of the GUI.
-
-## Dependencies
-
-Key libraries used:
-- **docling**: Modern document extraction and processing
-- **reportlab**: PDF generation
-- **pypdf**: PDF manipulation
-- **opencv-python**: Image processing
-- **pydantic**: Data validation

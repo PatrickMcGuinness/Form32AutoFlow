@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 fake = Faker()
 
 # Default input PDF location
-DEFAULT_INPUT_PDF = "Form32reader/WorkersCompData/dwc032desdoc-fillable.pdf"
+DEFAULT_INPUT_PDF = Path(__file__).resolve().parents[2] / "WorkersCompData" / "dwc032desdoc-fillable.pdf"
 
 # Mapping from Template field labels to PDF form field names
 FIELD_MAPPING = {
@@ -211,7 +211,7 @@ def main() -> None:
     parser.add_argument(
         "-i", "--input",
         type=Path,
-        default=Path(DEFAULT_INPUT_PDF),
+        default=DEFAULT_INPUT_PDF,
         help=f"Input fillable PDF path (default: {DEFAULT_INPUT_PDF})"
     )
     parser.add_argument(

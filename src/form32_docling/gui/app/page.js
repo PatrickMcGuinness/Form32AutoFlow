@@ -148,9 +148,9 @@ export default function Dashboard() {
                   )}
 
                   {isUploading && (
-                    <div className="flex items-center gap-3 px-6 py-4 text-white font-bold bg-white/10 rounded-xl border border-white/20 scale-in">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                      Processing Document...
+                    <div className="flex items-center gap-3 px-6 py-4 text-blue-800 font-bold bg-blue-50 rounded-xl border border-blue-200 scale-in">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-700 border-t-transparent"></div>
+                      Processing Form DWC032...
                     </div>
                   )}
                 </div>
@@ -181,7 +181,15 @@ export default function Dashboard() {
         </div>
 
         <div className="grid-cols-dynamic">
-          {patients.length === 0 && !isUploading ? (
+          {isUploading ? (
+            <div className="col-span-12 py-16 text-center rounded-3xl border-2 border-blue-100 bg-blue-50/40">
+              <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-blue-700 border-t-transparent"></div>
+              <h4 className="text-xl font-bold text-blue-800 mb-2">Processing in Progress</h4>
+              <p className="text-slate-600 max-w-lg mx-auto">
+                Extracting fields from Form 32 and preparing your patient record. This can take a moment.
+              </p>
+            </div>
+          ) : patients.length === 0 ? (
             <div className="col-span-12 py-24 text-center glass rounded-3xl border-dashed border-2 border-slate-200">
               <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-white text-slate-300 shadow-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>

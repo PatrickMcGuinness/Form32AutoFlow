@@ -3,6 +3,7 @@
 import shutil
 import uuid
 from collections.abc import Generator
+import os
 from pathlib import Path
 from typing import Any
 
@@ -237,7 +238,10 @@ else:
 def main() -> None:
     """Entry point for the form32-server command."""
     import uvicorn
-    uvicorn.run("form32_docling.api.main:app", host="0.0.0.0", port=8000, reload=True)
+    host = os.getenv("FORM32_SERVER_HOST", "127.0.0.1")
+    port = int(os.getenv("FORM32_SERVER_PORT", "8000"))
+    print(f"Form32 server starting at http://localhost:{port}")
+    uvicorn.run("form32_docling.api.main:app", host=host, port=port, reload=True)
 
 if __name__ == "__main__":
     main()
