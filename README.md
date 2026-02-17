@@ -23,13 +23,25 @@ Tools for processing Texas DWC-032 PDFs and generating downstream DWC forms.
 
 ## Install
 
-- Create conda env form32gpu with dependencies from TOML installed.
+- Create conda env form32gpu with dependencies from installed TOML file.
 
 ```bash
 cd Form32AutoFlow
 conda activate form32gpu
 pip install -e .
 ```
+
+Core runtime dependencies declared in `pyproject.toml` include:
+
+- `docling`
+- `reportlab`
+- `pypdf`
+- `opencv-python`
+- `numpy`
+- `pillow`
+- `pdf2image`
+- `pydantic`
+- `python-dotenv`
 
 Optional extras:
 
@@ -45,18 +57,6 @@ pip install -e ".[vlm]"        # torch, torchvision, qwen-vl-utils
 ```bash
 pip install faker
 ```
-
-Core runtime dependencies declared in `pyproject.toml`:
-
-- `docling`
-- `reportlab`
-- `pypdf`
-- `opencv-python`
-- `numpy`
-- `pillow`
-- `pdf2image`
-- `pydantic`
-- `python-dotenv`
 
 ## Commands
 
@@ -152,12 +152,6 @@ Environment variables:
 - `FORM32_DOCTOR_LICENSE_TYPE` default designated doctor license type
 - `FORM32_DOCTOR_LICENSE_JURISDICTION` default designated doctor license jurisdiction
 
-Defaults from code:
-
-- Linux/WSL output: `~/AIDev/Form32_output`
-- Linux/WSL PDF source: `~/AIDev/Form32_pdf`
-- Windows output: `D:\AIDev\Form32_ouput`
-- Windows PDF source: `D:\AIDev\Form32_pdf`
 
 ## API + GUI Notes
 
@@ -172,7 +166,7 @@ FastAPI endpoints include:
 - `DELETE /api/patients/{id}`
 - `DELETE /api/patients`
 
-The Next.js UI uses relative `/api/*` fetch calls. The supported deployment path is to build the UI and serve it from `form32-server`.
+The Next.js UI uses relative `/api/*` fetch calls. The supported deployment path is to build the UI and serve it from `form32-server` in a combined package.
 
 ```bash
 cd src/form32_docling/gui
@@ -182,10 +176,10 @@ cd ../../..
 form32-server
 ```
 
-Then open `http://localhost:8000`.
+For local use, open `http://localhost:8000`.
 
 ## Tests
 
 ```bash
-pytest
+pytest tests
 ```
