@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Medical Disability Review - Form DWC032 to DWC068/69/73",
+  title: "Medical Disability Review - Form DWC032 to DWC068, DWC069 and DWC073 Flow Automation",
   description: "Modern DWC Form Management and Generator - Medical IDP System",
 };
 
@@ -11,15 +11,12 @@ export default function RootLayout({ children }) {
       <body className="antialiased">
         <main className="min-h-screen flex flex-col">
           <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white-80 backdrop-blur-md">
-            <div className="container mx-auto flex h-16 items-center justify-between">
+            <div className="container mx-auto flex h-12 items-center justify-between">
               <div className="flex items-center gap-3">
                 <div>
-                  <h1 className="text-lg font-bold tracking-tight text-slate-900 m-0 leading-none">
-                    Medical Disability Review
+                  <h1 className="text-sm md:text-base font-bold tracking-tight text-black m-0 leading-none">
+                    Medical Disability Review - Form DWC032 to DWC068, DWC069 and DWC073 Flow Automation
                   </h1>
-                  <p className="text-xs-caps uppercase tracking-widest text-slate-500 font-bold mt-1">
-                    Form DWC032 to DWC068/69/73
-                  </p>
                 </div>
               </div>
             </div>

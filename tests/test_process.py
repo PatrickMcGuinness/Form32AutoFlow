@@ -1,6 +1,16 @@
+import os
 from pathlib import Path
 
+import pytest
+
 from form32_docling.core.form32_processor import Form32Processor
+
+# End-to-end PDF processing test is opt-in due heavy model/runtime requirements.
+if os.getenv("RUN_PROCESS_INTEGRATION_TESTS") != "1":
+    pytest.skip(
+        "Skipping process integration test. Set RUN_PROCESS_INTEGRATION_TESTS=1 to run.",
+        allow_module_level=True,
+    )
 
 
 def test_form32(verbose: bool = True) -> None:

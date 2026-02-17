@@ -1,11 +1,19 @@
 """Regression test for Form32 processing of LEROY.pdf."""
 
 import logging
+import os
 from pathlib import Path
 
 import pytest
 
 from form32_docling.core.form32_processor import Form32Processor
+
+# Full regression processing is opt-in due runtime/model requirements.
+if os.getenv("RUN_PROCESS_INTEGRATION_TESTS") != "1":
+    pytest.skip(
+        "Skipping LEROY regression integration test. Set RUN_PROCESS_INTEGRATION_TESTS=1 to run.",
+        allow_module_level=True,
+    )
 
 # Configure logging for tests
 logging.basicConfig(level=logging.DEBUG)
@@ -81,4 +89,3 @@ def test_process_leroy_pdf(test_data_dir: Path, tmp_path: Path) -> None:
     # Verify order recipients is extracted if present
     if patient_info.order_recipients:
         logger.info(f"Verified order recipients: {patient_info.order_recipients}")
-

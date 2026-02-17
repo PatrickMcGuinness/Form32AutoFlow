@@ -1,8 +1,58 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+
+const BODY_AREA_TO_CONDITION_LABEL = {
+    body_area_spine: "Spine and musculoskeletal structures of torso",
+    body_area_upper_extremities: "Upper extremities",
+    body_area_lower_extremities: "Lower extremities (excluding feet)",
+    body_area_teeth_jaw: "Teeth and jaw",
+    body_area_eyes: "Eyes",
+    body_area_other_systems: "Other body areas or systems",
+    body_area_brain_injury: "Traumatic brain injury",
+    body_area_spinal_cord: "Spinal cord injury",
+    body_area_burns: "Severe burns (including chemical burns)",
+    body_area_fractures: "Joint dislocation, fractures with vascular injury",
+    body_area_infectious: "Infectious diseases (complicated)",
+    body_area_regional_pain: "Complex regional pain syndrome",
+    body_area_chemical_exposure: "Chemical exposure",
+    body_area_cardiovascular: "Heart or cardiovascular condition",
+    body_area_mental_disorders: "Mental and behavioral disorders",
+};
+
+function seedEvaluationsFromBodyAreas(patientInfo) {
+    const existingEvals = Array.isArray(patientInfo.injury_evaluations)
+        ? patientInfo.injury_evaluations
+        : [];
+
+    const existingConditions = new Set(
+        existingEvals
+            .map((evalItem) => (evalItem?.condition_text || "").trim().toLowerCase())
+            .filter(Boolean)
+    );
+
+    const seeded = [...existingEvals];
+
+    Object.entries(BODY_AREA_TO_CONDITION_LABEL).forEach(([flag, conditionLabel]) => {
+        if (!patientInfo[flag]) return;
+        const key = conditionLabel.toLowerCase();
+        if (existingConditions.has(key)) return;
+
+        seeded.push({
+            condition_text: conditionLabel,
+            is_substantial_factor: null,
+            diagnosis_codes: ["", "", "", ""],
+        });
+        existingConditions.add(key);
+    });
+
+    return {
+        ...patientInfo,
+        injury_evaluations: seeded,
+    };
+}
 
 function WorkbenchContent() {
     const searchParams = useSearchParams();
@@ -13,24 +63,27 @@ function WorkbenchContent() {
     const [generating, setGenerating] = useState(false);
     const [generatedFiles, setGeneratedFiles] = useState([]);
 
-    useEffect(() => {
-        if (id) fetchPatient();
-        else setLoading(false);
-    }, [id]);
-
-    const fetchPatient = async () => {
+    const fetchPatient = useCallback(async () => {
         try {
             const resp = await fetch(`/api/patients/${id}`);
             if (resp.ok) {
                 const data = await resp.json();
-                setPatient(data);
+                setPatient({
+                    ...data,
+                    patient_info: seedEvaluationsFromBodyAreas(data.patient_info),
+                });
             }
         } catch (e) {
             console.error("Fetch failed", e);
         } finally {
             setLoading(false);
         }
-    };
+    }, [id]);
+
+    useEffect(() => {
+        if (id) fetchPatient();
+        else setLoading(false);
+    }, [id, fetchPatient]);
 
     const handleUpdateInfo = (field, value) => {
         setPatient({
@@ -203,32 +256,37 @@ function WorkbenchContent() {
     return (
         <div className="fade-in pb-20">
             {/* Workbench Top Bar (Consistency with Dashboard Hero) */}
-            <div className="bg-white py-12 mb-12 border-t-8 border-b-8 border-blue-700 shadow-sm">
+            <div className="bg-white pt-10 pb-14 mb-12 border-t-8 border-b-8 border-blue-700 shadow-sm">
                 <div className="container mx-auto">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                         <div>
-                            <Link href="/" className="inline-flex items-center gap-2 text-xs font-bold text-blue-700 hover:text-blue-800 transition-colors mb-4 uppercase tracking-widest">
+                            <Link href="/" className="inline-flex items-center gap-2 text-sm font-bold text-blue-700 hover:text-blue-800 transition-colors mb-6 uppercase tracking-widest">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
                                 Dashboard
                             </Link>
-                            <h2 className="text-3xl font-bold text-slate-900">Patient Medical Evaluation Workbench</h2>
-                            <p className="text-slate-500 mt-2 text-sm font-medium">Case ID: <span className="font-mono text-slate-800 font-bold">{id}</span> • Patient: <span className="font-bold text-blue-700 underline decoration-blue-200 decoration-2 underline-offset-4">{info.patient_name || "New Patient"}</span></p>
+                            <h2 className="text-3xl font-bold text-blue-700">Patient Medical Evaluation Workbench</h2>
+                            <p className="text-lg text-slate-600 mt-2 leading-relaxed font-medium">
+                                Conduct examination according to requested purpose(s). Evaluate claimed injury. Identify and evaluate additional claimed diagnoses. Determine if the compensable injury was a substantial factor in bringing about these conditions.
+                            </p>
+                            <p className="text-slate-500 mt-3 text-base font-medium">Case ID: <span className="text-slate-800 font-bold">{id}</span> • Patient: <span className="font-bold text-blue-700 underline decoration-blue-200 decoration-2 underline-offset-4">{info.patient_name || "New Patient"}</span></p>
                         </div>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className={`px-6 py-3 rounded-xl font-bold text-sm bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-all ${saving ? 'opacity-50' : ''}`}
-                            >
-                                {saving ? "Saving..." : "Save Progress"}
-                            </button>
-                            <button
-                                onClick={handleGenerate}
-                                disabled={generating}
-                                className={`px-6 py-3 rounded-xl font-bold text-sm bg-blue-700 text-white shadow-lg shadow-blue-500/20 hover:bg-blue-800 transition-all ${generating ? 'opacity-50' : ''}`}
-                            >
-                                {generating ? "Generating..." : "Finalize Reports"}
-                            </button>
+                        <div className="md:self-end">
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleSave}
+                                    disabled={saving}
+                                    className={`mb-2 px-6 py-3 rounded-xl font-bold text-sm bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition-all ${saving ? 'opacity-50' : ''}`}
+                                >
+                                    {saving ? "Saving..." : "Save Progress"}
+                                </button>
+                                <button
+                                    onClick={handleGenerate}
+                                    disabled={generating}
+                                    className={`mb-2 px-6 py-3 rounded-xl font-bold text-sm bg-blue-700 text-white shadow-lg shadow-blue-500/20 hover:bg-blue-800 transition-all ${generating ? 'opacity-50' : ''}`}
+                                >
+                                    {generating ? "Generating..." : "Finalize Reports"}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -299,16 +357,16 @@ function WorkbenchContent() {
 
                         {generatedFiles.length > 0 && (
                             <section className="card border-emerald-100 bg-emerald-50/20 scale-in mt-2">
-                                <h3 className="text-emerald-800 text-sm font-bold mb-6 flex items-center gap-2">
+                                <h3 className="text-emerald-800 text-base font-bold mb-6 flex items-center gap-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
                                     Generated Reports
                                 </h3>
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     {generatedFiles.map((file, i) => (
                                         <a
                                             key={i}
                                             href={`/api/download?path=${encodeURIComponent(file.path)}`}
-                                            className="flex items-center justify-between p-3 rounded-xl bg-white border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all text-xs font-bold text-emerald-700 group"
+                                            className="flex items-center justify-between p-4 rounded-xl bg-white border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all text-sm font-bold text-emerald-700 group"
                                         >
                                             <span className="truncate">{file.type}</span>
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-y-0.5 transition-transform"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
@@ -322,22 +380,17 @@ function WorkbenchContent() {
                     {/* RIGHT SIDE: Doctor's Evaluation (2/3rds) */}
                     <div className="col-span-12 md:col-span-8">
                         <section className="card shadow-md bg-white border-slate-200">
-                            <div className="mb-10 border-b border-slate-100 pb-6">
-                                <h3 className="text-2xl font-bold text-slate-900 mb-2">Doctor&apos;s Evaluation</h3>
-                                <p className="text-slate-500 max-w-2xl text-sm leading-relaxed">
-                                    Identify and evaluate additional claimed diagnoses. Determine if the compensable injury was a
-                                    <span className="font-bold text-slate-700"> substantial factor</span> in bringing about these conditions.
-                                </p>
+                            <div className="mb-3">
+                                <h3 className="text-2xl font-bold text-black mb-2">Doctor&apos;s Evaluation</h3>
                             </div>
 
                             <div className="space-y-8">
                                 <div className="p-6 rounded-2xl border border-slate-200 bg-slate-50/30">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Purpose of Examination (Part 5)</span>
-                                        <div className="h-px flex-grow mx-4 bg-slate-200"></div>
+                                    <div className="mb-6">
+                                        <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-sm font-bold text-black tracking-widest">Purpose Of Examination Part 5</span>
                                     </div>
 
-                                    <div className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-3">
                                         {purposeRows.map((row) => (
                                             <div key={row.key} className="rounded-xl border border-slate-200 bg-white p-3">
                                                 <label className="flex items-start gap-3">
@@ -348,7 +401,7 @@ function WorkbenchContent() {
                                                         disabled
                                                         readOnly
                                                     />
-                                                    <span className="text-sm font-semibold text-slate-800 leading-snug">
+                                                    <span className="text-sm font-semibold text-black leading-snug">
                                                         {row.label}
                                                     </span>
                                                 </label>
@@ -361,15 +414,15 @@ function WorkbenchContent() {
                                 </div>
 
                                 {info.injury_evaluations.map((evalItem, idx) => (
-                                    <div key={idx} className="p-6 rounded-2xl border border-slate-200 bg-slate-50/30 hover:shadow-sm transition-shadow">
-                                        <div className="flex items-center justify-between mb-6">
-                                            <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Condition #{idx + 1}</span>
+                                    <div key={idx} className="p-6 pt-10 rounded-2xl border border-slate-200 bg-slate-50/30 hover:shadow-sm transition-shadow">
+                                        <div className="flex items-center justify-between mb-5">
+                                            <span className="px-3 py-1 rounded-full bg-white border border-slate-200 text-sm font-bold text-black tracking-widest">Condition {idx + 1}</span>
                                             <div className="h-px flex-grow mx-4 bg-slate-200"></div>
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                             <div className="space-y-2">
-                                                <label className="label text-[11px]">Diagnosis / Condition Description</label>
+                                                <label className="label text-[11px] text-black">Diagnosis Condition Description</label>
                                                 <textarea
                                                     className="input min-h-[140px] resize-none leading-relaxed text-sm bg-white"
                                                     placeholder="Example: Lumbar disc herniation with radiculopathy..."
@@ -380,7 +433,7 @@ function WorkbenchContent() {
 
                                             <div className="space-y-6">
                                                 <div>
-                                                    <label className="label text-[11px]">Substantial Factor?</label>
+                                                    <label className="label text-[11px] text-black">Substantial Factor?</label>
                                                     <div className="flex gap-3">
                                                         <button
                                                             onClick={() => handleUpdateEval(idx, 'is_substantial_factor', true)}
@@ -398,7 +451,7 @@ function WorkbenchContent() {
                                                 </div>
 
                                                 <div>
-                                                    <label className="label text-[11px]">ICD-10 Diagnosis Codes</label>
+                                                    <label className="label text-[11px] text-black">ICD10 Diagnosis Codes</label>
                                                     <div className="grid grid-cols-4 gap-2">
                                                         {[0, 1, 2, 3].map(cIdx => (
                                                             <input

@@ -33,6 +33,37 @@ class Config:
     phase_budget_checkbox_seconds: float = 3.0
     phase_budget_total_seconds: float = 80.0
 
+    # Form32 validation markers: marker text -> human-readable description.
+    form32_validation_markers: dict[str, str] = field(
+        default_factory=lambda: {
+            "texas department of insurance": "TDI header",
+            "division of workers' compensation": "DWC reference",
+            "designated doctor": "DD form type",
+        }
+    )
+
+    # Form32 page classification markers (order matters for matching).
+    form32_page_type_markers: dict[str, str] = field(
+        default_factory=lambda: {
+            "DWC032_part1": "part 1. injured employee information",
+            "DWC032_part3": "part 3. treating doctor information",
+            "DWC032_part5": "part 5. purpose of examination",
+            "DWC032_part6": "part 6. requester information",
+        }
+    )
+
+    # Markers for front-page classification.
+    form32_front_page_markers: tuple[str, ...] = (
+        "division of workers' compensation",
+        "commissioner's order",
+        "you must get a medical exam",
+    )
+
+    # Markers for exam-order page two classification.
+    form32_exam_order_page_two_markers: tuple[str, ...] = (
+        "more information about the exam:",
+    )
+
     # Designated Doctor Defaults
     doctor_phone: str = custom_config.DEFAULT_DOCTOR_PHONE
     doctor_license_type: str = custom_config.DEFAULT_DOCTOR_LICENSE_TYPE
@@ -139,6 +170,10 @@ class Config:
             "phase_budget_extraction_seconds": self.phase_budget_extraction_seconds,
             "phase_budget_checkbox_seconds": self.phase_budget_checkbox_seconds,
             "phase_budget_total_seconds": self.phase_budget_total_seconds,
+            "form32_validation_markers": self.form32_validation_markers,
+            "form32_page_type_markers": self.form32_page_type_markers,
+            "form32_front_page_markers": list(self.form32_front_page_markers),
+            "form32_exam_order_page_two_markers": list(self.form32_exam_order_page_two_markers),
             "doctor_phone": self.doctor_phone,
             "doctor_license_type": self.doctor_license_type,
             "doctor_license_jurisdiction": self.doctor_license_jurisdiction,

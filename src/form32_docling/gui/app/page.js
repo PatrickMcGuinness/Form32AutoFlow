@@ -108,11 +108,11 @@ export default function Dashboard() {
 
   return (
     <div className="fade-in">
-      <section className="bg-white py-12 mb-12 border-t-8 border-b-8 border-blue-700 shadow-sm">
+      <section className="bg-white py-10 mb-12 border-t-8 border-b-8 border-blue-700 shadow-sm">
         <div className="container mx-auto">
           <div className="relative overflow-hidden py-4">
             <div className="relative z-10 max-w-3xl">
-              <h2 className="text-4xl font-bold mb-4 tracking-tight text-blue-700">Patient Review Dashboard</h2>
+              <h2 className="text-3xl font-bold mb-3 tracking-tight text-blue-700">Patient Review Dashboard</h2>
               <p className="text-lg text-slate-600 mb-10 leading-relaxed font-medium">
                 Upload New Exam Order Letters (Form 32) to begin the professional disability review process.
                 Our system automatically extracts data to populate DWC 068, 069, and 073 forms.
@@ -138,14 +138,13 @@ export default function Dashboard() {
                     </label>
                   </div>
 
-                  {selectedFile && !isUploading && (
-                    <button
-                      onClick={handleProcessUpload}
-                      className="btn bg-blue-500 text-white px-8 py-4 text-sm font-bold shadow-xl shadow-blue-500/20 hover:bg-blue-600 scale-in"
-                    >
-                      Process Form DWC032
-                    </button>
-                  )}
+                  <button
+                    onClick={handleProcessUpload}
+                    disabled={!selectedFile || isUploading}
+                    className={`btn px-8 py-4 text-sm font-bold shadow-xl transition-all ${!selectedFile || isUploading ? "bg-slate-300 text-slate-500 cursor-not-allowed shadow-none" : "bg-blue-500 text-white shadow-blue-500/20 hover:bg-blue-600"} ${selectedFile ? "scale-in" : ""}`}
+                  >
+                    Process Form DWC032
+                  </button>
 
                   {isUploading && (
                     <div className="flex items-center gap-3 px-6 py-4 text-blue-800 font-bold bg-blue-50 rounded-xl border border-blue-200 scale-in">
@@ -153,22 +152,21 @@ export default function Dashboard() {
                       Processing Form DWC032...
                     </div>
                   )}
+
+                  <div className={`flex items-center gap-2 text-sm font-medium rounded-xl px-4 py-2 border min-w-[340px] ${selectedFile ? "text-slate-700 bg-slate-100 border-slate-200" : "text-slate-400 bg-slate-50 border-slate-200"}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={selectedFile ? "text-slate-500" : "text-slate-400"}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
+                    <span>Selected:</span>
+                    <span className={selectedFile ? "font-bold text-slate-900 truncate" : "font-semibold"}>{selectedFile ? selectedFile.name : "No file selected"}</span>
+                  </div>
                 </div>
 
-                {selectedFile && !isUploading && (
-                  <div className="flex items-center gap-2 text-sm text-blue-100 font-medium scale-in opacity-80">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-300"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
-                    Selected: <span className="text-white font-bold border-b border-blue-400/50 pb-0.5">{selectedFile.name}</span>
+                {uploadError && (
+                  <div className="mt-2 rounded-xl bg-red-500/10 p-4 text-sm text-red-100 border border-red-500/20 flex items-center gap-3 scale-in">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                    <span className="font-semibold">{uploadError}</span>
                   </div>
                 )}
               </div>
-
-              {uploadError && (
-                <div className="mt-8 rounded-xl bg-red-500/10 p-4 text-sm text-red-100 border border-red-500/20 flex items-center gap-3 scale-in">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                  <span className="font-semibold">{uploadError}</span>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -181,15 +179,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid-cols-dynamic">
-          {isUploading ? (
-            <div className="col-span-12 py-16 text-center rounded-3xl border-2 border-blue-100 bg-blue-50/40">
-              <div className="mx-auto mb-5 h-12 w-12 animate-spin rounded-full border-4 border-blue-700 border-t-transparent"></div>
-              <h4 className="text-xl font-bold text-blue-800 mb-2">Processing in Progress</h4>
-              <p className="text-slate-600 max-w-lg mx-auto">
-                Extracting fields from Form 32 and preparing your patient record. This can take a moment.
-              </p>
-            </div>
-          ) : patients.length === 0 ? (
+          {patients.length === 0 ? (
             <div className="col-span-12 py-24 text-center glass rounded-3xl border-dashed border-2 border-slate-200">
               <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-white text-slate-300 shadow-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
@@ -248,7 +238,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {patients.length > 0 && !isUploading && (
+        {patients.length > 0 && (
           <div className="mt-16 pt-8 border-t border-slate-200 flex justify-center">
             <button
               onClick={handleClearAll}

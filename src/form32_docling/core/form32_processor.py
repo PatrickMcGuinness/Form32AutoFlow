@@ -279,11 +279,7 @@ class Form32Processor:
             True if form appears valid.
         """
         logger.debug(f"[{datetime.now().isoformat()}] ENTER Form32Processor.validate_form()")
-        validation_markers = {
-            "texas department of insurance": "TDI header",
-            "division of workers' compensation": "DWC reference",
-            "designated doctor": "DD form type",
-        }
+        validation_markers = self.config.form32_validation_markers
 
         text_lower = self.full_text.lower()
         missing = []
@@ -569,23 +565,11 @@ class Form32Processor:
         dwc032_pages: dict[int, str] = {}
 
         # Page type markers - order matters for matching
-        page_type_markers = {
-            "DWC032_part1": "part 1. injured employee information",
-            "DWC032_part3": "part 3. treating doctor information",
-            "DWC032_part5": "part 5. purpose of examination",
-            "DWC032_part6": "part 6. requester information",
-        }
+        page_type_markers = self.config.form32_page_type_markers
 
         # Front page and page two validation markers (tuples for immutability and slight performance gain)
-        FRONT_PAGE_MARKERS: tuple[str, ...] = (
-            "division of workers' compensation",
-            "commissioner's order",
-            "you must get a medical exam",
-        )
-        EXAM_ORDER_PAGE_TWO_MARKERS: tuple[str, ...] = (
-           # "your exam is",
-           "more information about the exam:",
-        )
+        FRONT_PAGE_MARKERS = self.config.form32_front_page_markers
+        EXAM_ORDER_PAGE_TWO_MARKERS = self.config.form32_exam_order_page_two_markers
 
         def _matches_all_markers(text: str, markers: tuple[str, ...]) -> bool:
             """Check if all markers are present in text.
